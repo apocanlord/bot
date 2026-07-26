@@ -40,17 +40,11 @@ async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 3. Ana Çalıştırma Bloğu
 if __name__ == '__main__':
-    # Web sunucusunu arka planda başlatıyoruz
     keep_alive()
     
-    # Bot Token'ını buraya kendi token'ınla değiştirmelisin
-    TOKEN = "BURAYA_BOT_TOKENINI_YAZ"
+    # Bot Token'ın buraya eklendi
+    TOKEN = "8646358320:AAFuW7CHUPtCgT0wgfP9xZxf6URYTWOoYWE"
     
     application = ApplicationBuilder().token(TOKEN).build()
-    
-    # Panel komutunu ekliyoruz
     application.add_handler(CommandHandler("panel", panel_command))
-    
-    # Botu dinlemeye başlıyoruz
     application.run_polling()
-
