@@ -9,11 +9,13 @@ from flask import Flask
 # Logging ayarları
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Token, Admin ID, Kanal ve API Bilgileri
+# Token, Admin ID ve API Bilgileri
 BOT_TOKEN = "8646358320:AAFuW7CHUPtCgT0wgfP9xZxf6URYTWOoYWE"
 ADMIN_ID = 6073294253
-CHANNEL = "@arastirduyuru"
 BASE_URL = 'http://arastir.vip/api'
+
+# Birden fazla zorunlu kanal listesi (Burayı panelden veya koddan yönetebilirsin)
+CHANNELS = ["@arastirduyuru"] 
 
 USERS_DB = set()
 LEFT_COUNTS = {}
@@ -29,14 +31,17 @@ app_flask = Flask(__name__)
 def home():
     return "Bot aktif ve çalışıyor!"
 
-async def check_channel_membership(bot, user_id):
-    try:
-        member = await bot.get_chat_member(chat_id=CHANNEL, user_id=user_id)
-        if member.status in ['member', 'administrator', 'creator']:
-            return True
-        return False
-    except Exception:
-        return False
+# Çoklu kanal kontrol fonksiyonu
+async def check_all_channels(bot, user_id):
+    not_joined = []
+    for ch in CHANNELS:
+        try:
+            member = await bot.get_chat_member(chat_id=ch, user_id=user_id)
+            if member.status not in ['member', 'administrator', 'creator']:
+                not_joined.append(ch)
+        except Exception:
+            not_joined.append(ch)
+    return not_joined
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -45,10 +50,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔️ Bu botu kullanmanız yasaklanmıştır.")
         return
 
-    is_in_channel = await check_channel_membership(context.bot, user.id)
-    if not is_in_channel:
+    # Tüm kanalları kontrol et
+    missing_channels = await check_all_channels(context.bot, user.id)
+    if missing_channels:
+        ch_list = "\n".join([f"• {ch}" for ch in missing_channels])
         await update.message.reply_text(
-            f"⚠️ Botu kullanabilmek için öncelikle {CHANNEL} kanalımıza abone olmalısınız!\n\nAbone olduktan sonra tekrar /start yazabilirsiniz."
+            f"⚠️ Botu kullanabilmek için aşağıdaki kanal(lar)ımıza abone olmalısınız:\n\n{ch_list}\n\nAbone olduktan sonra tekrar /start yazabilirsiniz kanka."
         )
         return
 
@@ -74,7 +81,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
     
-    # Kullanıcı Menü Butonları
     if data == "tc":
         await query.message.reply_text("🆔 **TC Sorgu için:**\n`/tc [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
     elif data == "adsoyad":
@@ -94,7 +100,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "isyeri":
         await query.message.reply_text("🏢 **İşyeri Sorgu için:**\n`/isyeri [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
     
-    # ADMIN PANEL BUTONLARI
     elif data == "admin_users":
         if update.effective_user.id != ADMIN_ID:
             return
@@ -120,9 +125,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "admin_kanal":
         if update.effective_user.id != ADMIN_ID:
             return
-        await query.message.reply_text(f"📢 **Kanal Zorunluluğu:**\nŞu an aktif zorunlu kanal: `{CHANNEL}`\nKanaldan çıkanlar 6 saatte bir kontrol edilip otomatik uyarılıyor/banlanıyor kanka.")
+        ch_list = "\n".join([f"• {ch}" for ch in CHANNELS])
+        await query.message.reply_text(
+            f"📢 **Zorunlu Kanallar Listesi:**\n{ch_list}\n\n"
+            f"➕ Kanal eklemek için: `/kanalekle @KanalAdi`\n"
+            f"➖ Kanal silmek için: `/kanalsil @KanalAdi` şeklinde yazabilirsin kanka.",
+            parse_mode="Markdown"
+        )
 
-# PROFESYONEL BUTONLU /PANEL KOMUTU
+# YÖNETİCİ PANELİ KOMUTU
 async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("Bu komutu kullanmaya yetkin yok kanka!")
@@ -146,6 +157,43 @@ async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Aşağıdaki yönetim butonlarını kullanabilirsin kanka:",
         reply_markup=reply_markup
     )
+
+# KANAL EKLEME / SİLME KOMUTLARI
+async def kanal_ekle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    args = context.args
+    if not args:
+        await update.message.reply_text("Kullanım: `/kanalekle @KanalKullaniciAdi` şeklinde yaz kanka.")
+        return
+    
+    new_ch = args[0]
+    if not new_ch.startswith("@"):
+        new_ch = "@" + new_ch
+        
+    if new_ch in CHANNELS:
+        await update.message.reply_text(f"⚠️ `{new_ch}` zaten zorunlu kanallar listesinde var kanka.", parse_mode="Markdown")
+    else:
+        CHANNELS.append(new_ch)
+        await update.message.reply_text(f"✅ `{new_ch}` başarıyla zorunlu kanallara eklendi kanka!", parse_mode="Markdown")
+
+async def kanal_sil(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    args = context.args
+    if not args:
+        await update.message.reply_text("Kullanım: `/kanalsil @KanalKullaniciAdi` şeklinde yaz kanka.")
+        return
+    
+    target_ch = args[0]
+    if not target_ch.startswith("@"):
+        target_ch = "@" + target_ch
+        
+    if target_ch in CHANNELS:
+        CHANNELS.remove(target_ch)
+        await update.message.reply_text(f"✅ `{target_ch}` zorunlu kanallardan kaldırıldı kanka.", parse_mode="Markdown")
+    else:
+        await update.message.reply_text(f"❌ `{target_ch}` listede bulunamadı kanka.", parse_mode="Markdown")
 
 # API SORGULAMA FONKSİYONLARI (.php Uzantılı)
 async def adsoyad_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -180,22 +228,22 @@ async def tc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         await msg.edit_text("❌ Sorgulama başarısız oldu.")
 
-# PERİYODİK KANAL KONTROLÜ
+# PERİYODİK KANAL KONTROLÜ (Tüm kanalları tarar)
 async def periodic_channel_check(app):
     with app.bot:
         for uid, uname, _ in list(USERS_DB):
             if uid in BANNED_USERS:
                 continue
-            is_in = await check_channel_membership(app.bot, uid)
-            if not is_in:
+            missing_channels = await check_all_channels(app.bot, uid)
+            if missing_channels:
                 LEFT_COUNTS[uid] = LEFT_COUNTS.get(uid, 0) + 1
                 count = LEFT_COUNTS[uid]
                 try:
                     if count == 1:
-                        await app.bot.send_message(chat_id=uid, text=f"⚠️ Dikkat! {CHANNEL} kanalımızdan çıktığınız tespit edildi. Tekrar katılın!")
+                        await app.bot.send_message(chat_id=uid, text="⚠️ Dikkat! Zorunlu kanal(lar)ımızdan çıktığınız tespit edildi. Lütfen tekrar katılın!")
                     elif count >= 2:
                         BANNED_USERS.add(uid)
-                        await app.bot.send_message(chat_id=uid, text="⛔️ Kanaldan tekrar çıktığınız için banlandınız!")
+                        await app.bot.send_message(chat_id=uid, text="⛔️ Kanallardan çıktığınız için sistem tarafından banlandınız!")
                 except Exception:
                     pass
 
@@ -228,7 +276,7 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id = int(args[0])
         BANNED_USERS.add(target_id)
-        await update.message.reply_text(f"✅ `{target_id}` ID'li kullanıcı banlandı kanka.")
+        await update.message.reply_text(f"✅ `{target_id}` ID'li kullanıcı banlandı kanka.", parse_mode="Markdown")
     except ValueError:
         await update.message.reply_text("Geçerli bir ID gir kanka.")
 
@@ -249,6 +297,8 @@ if __name__ == '__main__':
 
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("panel", panel_command))
+    app.add_handler(CommandHandler("kanalekle", kanal_ekle))
+    app.add_handler(CommandHandler("kanalsil", kanal_sil))
     app.add_handler(CommandHandler("duyuru", duyuru_command))
     app.add_handler(CommandHandler("ban", ban_command))
     app.add_handler(CommandHandler("adsoyad", adsoyad_command))
