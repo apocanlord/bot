@@ -15,7 +15,7 @@ BASE_URL = 'http://arastir.vip/api'
 
 # Veritabanı simülasyonları
 USERS_DB = set() # (user_id, username, first_name)
-LEFT_COUNTS = {} # Kullanıcıların kanaldan kaç kez çıktığını takip etmek için: {user_id: sayi}
+LEFT_COUNTS = {} # Kullanıcıların kanaldan kaç kez çıktığını takip etmek için
 BANNED_USERS = set() # Banlanan kullanıcılar
 
 HEADERS = {
@@ -38,7 +38,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔️ Bu botu kullanmanız yasaklanmıştır.")
         return
 
-    # Kanalda mi kontrolü
     is_in_channel = await check_channel_membership(context.bot, user.id)
     if not is_in_channel:
         await update.message.reply_text(
@@ -62,7 +61,33 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
-# Periyodik Kontrol (6 Saatte Bir Çalışır ve Kanaldan Çıkanları Yakalar)
+# Butonlara tıklandığında çalışan kısım (Takılma sorununu çözen yer)
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer() # Butonun yükleniyor simgesini kapatır
+    
+    data = query.data
+    
+    if data == "tc":
+        await query.message.reply_text("🆔 **TC Sorgu için kullanım:**\n`/tc [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+    elif data == "adsoyad":
+        await query.message.reply_text("👤 **Ad Soyad Sorgu için kullanım:**\n`/adsoyad [Ad] [Soyad]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+    elif data == "aile":
+        await query.message.reply_text("👥 **Aile Sorgu için kullanım:**\n`/aile [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+    elif data == "sulale":
+        await query.message.reply_text("🌳 **Sülale Sorgu için kullanım:**\n`/sulale [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+    elif data == "cocuklar":
+        await query.message.reply_text("👶 **Çocuklar Sorgu için kullanım:**\n`/cocuklar [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+    elif data == "adres":
+        await query.message.reply_text("🏠 **Adres Sorgu için kullanım:**\n`/adres [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+    elif data == "gsm_tc":
+        await query.message.reply_text("📱 **GSM -> TC için kullanım:**\n`/gsmtc [Telefon]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+    elif data == "tc_gsm":
+        await query.message.reply_text("☎️ **TC -> GSM için kullanım:**\n`/tcgsm [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+    elif data == "isyeri":
+        await query.message.reply_text("🏢 **İşyeri Sorgu için kullanım:**\n`/isyeri [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+
+# Periyodik Kontrol (6 Saatte Bir)
 async def periodic_channel_check(app):
     with app.bot:
         for uid, uname, _ in list(USERS_DB):
@@ -71,19 +96,16 @@ async def periodic_channel_check(app):
             
             is_in = await check_channel_membership(app.bot, uid)
             if not is_in:
-                # Kanaldan çıkmış demektir! Sayacı artıralım.
                 LEFT_COUNTS[uid] = LEFT_COUNTS.get(uid, 0) + 1
                 count = LEFT_COUNTS[uid]
                 
                 try:
                     if count == 1:
-                        # 1. İhlal: Uyarı gönder
                         await app.bot.send_message(
                             chat_id=uid,
-                            text=f"⚠️ Dikkat! {CHANNEL} kanalımızdan çıktığınız tespit edildi. Botu kullanmaya devam edebilmek için lütfen tekrar kanalımıza katılın. Tekrarı halinde sistem tarafından banlanacaksınız!"
+                            text=f"⚠️ Dikkat! {CHANNEL} kanalımızdan çıktığınız tespit edildi. Botu kullanmaya devam edebilmek için lütfen tekrar kanalımıza katılın. Tekrarı halinde banlanacaksınız!"
                         )
                     elif count >= 2:
-                        # 2. İhlal ve üzeri: Banla
                         BANNED_USERS.add(uid)
                         await app.bot.send_message(
                             chat_id=uid,
@@ -92,10 +114,9 @@ async def periodic_channel_check(app):
                 except Exception:
                     pass
 
-# Yönetici Paneli Komutu
+# Yönetici Paneli
 async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id != ADMIN_ID:
+    if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("Bu komutu kullanmaya yetkin yok kanka!")
         return
 
@@ -157,7 +178,7 @@ async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await status_msg.edit_text(f"✅ Duyuru tamamlandı!\n\nBaşarılı: {success}\nBaşarısız: {fail}")
 
-# Manuel Ban Komutu
+# Manuel Ban
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -177,7 +198,6 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Zamanlayıcı (Her 6 saatte bir kanaldan çıkanları kontrol eder)
     scheduler = BackgroundScheduler()
     scheduler.add_job(lambda: app.job_queue.run_once(lambda ctx: periodic_channel_check(app), 0), 'interval', hours=6)
     scheduler.start()
@@ -187,9 +207,12 @@ def main():
     app.add_handler(CommandHandler("kullanicilar", kullanicilar_command))
     app.add_handler(CommandHandler("duyuru", duyuru_command))
     app.add_handler(CommandHandler("ban", ban_command))
+    
+    # Buton tıklamalarını yakalayan handler (Burada eklendi)
+    app.add_handler(CallbackQueryHandler(button_handler))
 
-    print("Bot ve 6 saatlik kanal kontrol mekanizması aktif...")
+    print("Bot ve buton yöneticisi aktif...")
     app.run_polling()
 
-if __name__ == '__main__':
+if __name__ == 'main__':
     main()
