@@ -1,16 +1,42 @@
 import os
+import json
 import html
 import io
+import asyncio
 import threading
 import requests
 from flask import Flask
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, ChatMemberHandler, filters, ContextTypes
+from telegram.error import TelegramError
 
 ADMIN_ID = 6073294253
 TOKEN = "8646358320:AAEj6rlEpCxX1aLOXspgbsTNpVaYtvvGrbE"
 
-# 1. Render Port Ayarı İçin Web Sunucusu
+# --- VERİTABANI YÖNETİMİ (JSON) ---
+DATA_FILE = "bot_data.json"
+
+def load_data():
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "users": {},        # "user_id": {"warnings": 0, "is_banned": False}
+        "channels": [],     # ["@kanal1", "@kanal2"]
+        "must_join": True   # Kanal zorunluluğu
+    }
+
+def save_data(data):
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+db = load_data()
+duyuru_iptal_flag = False
+
+# --- 1. Render Web Sunucusu ---
 app = Flask('')
 
 @app.route('/')
@@ -25,8 +51,88 @@ def keep_alive():
     t = threading.Thread(target=run_flask)
     t.start()
 
-# 2. Start Komutu ve Menü Yapısı
+# --- YARDIMCI FONKSİYONLAR ---
+def register_user(user_id):
+    uid_str = str(user_id)
+    if uid_str not in db["users"]:
+        db["users"][uid_str] = {"warnings": 0, "is_banned": False}
+        save_data(db)
+
+async def check_channel_subscription(user_id, context: ContextTypes.DEFAULT_TYPE):
+    """Kullanıcının zorunlu kanallara üye olup olmadığını kontrol eder ve ihlal durumunu işler."""
+    if not db["must_join"] or not db["channels"]:
+        return True, []
+
+    missing_channels = []
+    uid_str = str(user_id)
+    register_user(user_id)
+    user_info = db["users"].get(uid_str, {"warnings": 0, "is_banned": False})
+
+    if user_info.get("is_banned"):
+        return False, ["BANNED"]
+
+    for channel in db["channels"]:
+        try:
+            member = await context.bot.get_chat_member(chat_id=channel, user_id=user_id)
+            if member.status in ['left', 'kicked']:
+                missing_channels.append(channel)
+        except Exception:
+            pass
+
+    if missing_channels:
+        current_warns = user_info.get("warnings", 0) + 1
+        
+        if current_warns >= 3:
+            db["users"][uid_str]["is_banned"] = True
+            db["users"][uid_str]["warnings"] = 3
+            save_data(db)
+            return False, ["BANNED"]
+        else:
+            db["users"][uid_str]["warnings"] = current_warns
+            save_data(db)
+            return False, missing_channels
+
+    return True, []
+
+# Uyarı ve Kanal Katılım Mesajı Gönderici
+async def send_subscription_warning(chat_id, user_id, missing, context: ContextTypes.DEFAULT_TYPE):
+    uid_str = str(user_id)
+    warn_count = db["users"].get(uid_str, {}).get("warnings", 1)
+
+    text = (
+        "⚠️ <b>UYARI: ZORUNLU KANAL ÜYELİĞİ EKSİK!</b>\n\n"
+        "Bu botu kullanmaya devam edebilmek için zorunlu kanallara abone olmak zorundasınız.\n\n"
+        f"🚨 <b>İhlal / Uyarı Durumu:</b> <code>{warn_count}/3</code>\n"
+        "<i>(Kanaldan çıkmaya devam ederseniz 3. uyarıda bota erişiminiz tamamen engellenecektir!)</i>\n\n"
+        "Lütfen aşağıdaki kanallara katılıp <b>'✅ Katıldım, Onayla'</b> butonuna basın:"
+    )
+    
+    keyboard = []
+    for ch in missing:
+        clean_ch = ch.replace("@", "")
+        keyboard.append([InlineKeyboardButton(f"📢 Katıl: {ch}", url=f"https://t.me/{clean_ch}")])
+    keyboard.append([InlineKeyboardButton("✅ Katıldım, Onayla", callback_data="check_subs")])
+
+    await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+
+# --- 2. START KOMUTU ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    register_user(user_id)
+
+    if db["users"].get(str(user_id), {}).get("is_banned"):
+        await update.message.reply_text("⛔ <b>Sistemden Banlandınız!</b>\nZorunlu kanallardan 3 kez ayrıldığınız için bota erişiminiz tamamen engellenmiştir.", parse_mode="HTML")
+        return
+
+    is_ok, missing = await check_channel_subscription(user_id, context)
+    if not is_ok:
+        if missing == ["BANNED"]:
+            await update.message.reply_text("⛔ <b>Sistemden Banlandınız!</b>\nZorunlu kanallardan 3 kez ayrıldığınız için bota erişiminiz tamamen engellenmiştir.", parse_mode="HTML")
+            return
+        
+        await send_subscription_warning(update.effective_chat.id, user_id, missing, context)
+        return
+
     menu_text = (
         "🔍 <b>AraştırX | Analiz Botu</b> Paneline Hoş Geldiniz!\n\n"
         "İşlem yapmak için aşağıdaki menüden bir kategori seçin:"
@@ -44,32 +150,177 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📱 TC-GSM Sorgula", callback_data="query_tcgsm")],
         [InlineKeyboardButton("📱 GSM-TC Sorgula", callback_data="query_gsmtc")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(menu_text, parse_mode="HTML", reply_markup=reply_markup)
+    await update.message.reply_text(menu_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# 3. Admin Panel Komutu
+# --- 3. YÖNETİM PANELİ KOMUTLARI ---
 async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Bu komutu kullanma yetkiniz yok.")
         return
 
+    total_users = len(db["users"])
+    banned_users = sum(1 for u in db["users"].values() if u.get("is_banned"))
+    channels_str = "\n".join([f"• {c}" for c in db["channels"]]) if db["channels"] else "<i>Ekli kanal yok.</i>"
+    must_join_status = "🟢 AÇIK" if db["must_join"] else "🔴 KAPALI"
+
     panel_text = (
-        "⚙️ <b>AraştırX | Analiz Botu Yönetim Paneli</b>\n"
+        "⚙️ <b>AraştırX | Yönetici Paneli</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "🟢 Durum: <b>Aktif</b>"
+        f"📊 <b>Toplam Kullanıcı:</b> <code>{total_users}</code>\n"
+        f"🚫 <b>Banlı Kullanıcı:</b> <code>{banned_users}</code>\n"
+        f"📢 <b>Kanal Zorunluluğu:</b> {must_join_status}\n\n"
+        f"📌 <b>Ekli Bulunan Kanallar:</b>\n{channels_str}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "<b>Komut Rehberi:</b>\n"
+        "👉 <code>/duyuru Mesajınız</code> : Duyuru atar.\n"
+        "👉 <code>/duyuru_iptal</code> : Duyuruyu keser.\n"
+        "👉 <code>/kanal_ekle @kanaladi</code> : Kanal ekler.\n"
+        "👉 <code>/kanal_sil @kanaladi</code> : Kanalı siler.\n"
+        "👉 <code>/kullanicilar</code> : Kullanıcıları ve ID'leri listeler.\n"
+        "👉 <code>/unban ID</code> : Ban açar."
     )
+    
     keyboard = [
-        [InlineKeyboardButton("⏸️ Durdur", callback_data="stop_bot")],
-        [InlineKeyboardButton("📢 Kanal Zorunluluğu 🟢", callback_data="toggle_channel")]
+        [InlineKeyboardButton(f"Kanal Zorunluluğu ({must_join_status})", callback_data="toggle_channel_req")]
     ]
     await update.message.reply_text(panel_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# 4. Buton Tıklama Yönetimi
+async def toggle_channel_req(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query.from_user.id != ADMIN_ID: return
+    
+    db["must_join"] = not db["must_join"]
+    save_data(db)
+    await query.answer("Kanal zorunluluğu güncellendi!")
+    await panel_command(update, context)
+
+async def add_channel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID: return
+    if not context.args:
+        await update.message.reply_text("Kullanım: <code>/kanal_ekle @kanaladi</code>", parse_mode="HTML")
+        return
+    
+    ch_name = context.args[0]
+    if not ch_name.startswith("@"): ch_name = "@" + ch_name
+        
+    if ch_name not in db["channels"]:
+        db["channels"].append(ch_name)
+        save_data(db)
+        await update.message.reply_text(f"✅ <b>{ch_name}</b> eklendi.\n<i>(Botun kanalda ADMIN olduğundan emin olun!)</i>", parse_mode="HTML")
+    else:
+        await update.message.reply_text("⚠️ Bu kanal zaten ekli.")
+
+async def del_channel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID: return
+    if not context.args:
+        await update.message.reply_text("Kullanım: <code>/kanal_sil @kanaladi</code>", parse_mode="HTML")
+        return
+        
+    ch_name = context.args[0]
+    if not ch_name.startswith("@"): ch_name = "@" + ch_name
+
+    if ch_name in db["channels"]:
+        db["channels"].remove(ch_name)
+        save_data(db)
+        await update.message.reply_text(f"🗑️ <b>{ch_name}</b> listeden çıkarıldı.", parse_mode="HTML")
+    else:
+        await update.message.reply_text("⚠️ Kanal bulunamadı.")
+
+async def users_list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID: return
+    u_list = list(db["users"].keys())
+    total = len(u_list)
+    msg = f"👥 <b>Toplam Kullanıcı ({total}):</b>\n\n"
+    for uid in u_list[:100]:
+        is_b = " (BANLI)" if db["users"][uid].get("is_banned") else ""
+        msg += f"• <code>{uid}</code>{is_b}\n"
+    if total > 100: msg += f"\n<i>...ve {total - 100} kişi daha.</i>"
+    await update.message.reply_text(msg, parse_mode="HTML")
+
+async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID: return
+    if not context.args:
+        await update.message.reply_text("Kullanım: <code>/unban KULLANICI_ID</code>", parse_mode="HTML")
+        return
+    
+    uid = context.args[0]
+    if uid in db["users"]:
+        db["users"][uid]["is_banned"] = False
+        db["users"][uid]["warnings"] = 0
+        save_data(db)
+        await update.message.reply_text(f"✅ <code>{uid}</code> ID'li kullanıcının banı kaldırıldı.", parse_mode="HTML")
+    else:
+        await update.message.reply_text("Kullanıcı bulunamadı.")
+
+# --- 4. DUYURU SİSTEMİ ---
+async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global duyuru_iptal_flag
+    if update.effective_user.id != ADMIN_ID: return
+    
+    duyuru_msg = " ".join(context.args)
+    if not duyuru_msg:
+        await update.message.reply_text("⚠️ Lütfen duyuru metnini girin.", parse_mode="HTML")
+        return
+        
+    duyuru_iptal_flag = False
+    status_msg = await update.message.reply_text("📢 <b>Duyuru Başlatıldı...</b>", parse_mode="HTML")
+    
+    success = 0
+    failed = 0
+    user_ids = list(db["users"].keys())
+    total = len(user_ids)
+
+    for idx, uid in enumerate(user_ids, 1):
+        if duyuru_iptal_flag:
+            await status_msg.edit_text(f"🛑 <b>Duyuru İptal Edildi!</b>\n\nGönderilen: {success}\nBaşarısız: {failed}", parse_mode="HTML")
+            return
+
+        try:
+            await context.bot.send_message(chat_id=int(uid), text=f"📢 <b>DUYURU</b>\n━━━━━━━━━━━━━━━━━━\n{duyuru_msg}", parse_mode="HTML")
+            success += 1
+        except Exception:
+            failed += 1
+            
+        if idx % 10 == 0 or idx == total:
+            try:
+                await status_msg.edit_text(f"⏳ <b>Duyuru Gönderiliyor...</b> ({idx}/{total})\n\n✅ Başarılı: {success}\n❌ Başarısız: {failed}", parse_mode="HTML")
+            except Exception: pass
+            
+        await asyncio.sleep(0.05)
+
+    await status_msg.edit_text(f"✅ <b>Duyuru Tamamlandı!</b>\n\n📊 Toplam: {total}\n✅ Gönderilen: {success}\n❌ Ulaşılamayan: {failed}", parse_mode="HTML")
+
+async def cancel_broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global duyuru_iptal_flag
+    if update.effective_user.id != ADMIN_ID: return
+    duyuru_iptal_flag = True
+    await update.message.reply_text("🛑 <b>Duyuru iptal ediliyor...</b>", parse_mode="HTML")
+
+# --- 5. BUTON VE MESAJ HANDLER ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    user_id = query.from_user.id
     data = query.data
 
+    if data == "check_subs":
+        await query.answer()
+        await start_command(update, context)
+        return
+
+    if data == "toggle_channel_req":
+        await toggle_channel_req(update, context)
+        return
+
+    is_ok, missing = await check_channel_subscription(user_id, context)
+    if not is_ok:
+        await query.answer("⚠️ Zorunlu kanallara katılmalısınız!", show_alert=True)
+        if missing == ["BANNED"]:
+            await query.message.reply_text("⛔ <b>Banlandınız!</b>", parse_mode="HTML")
+        else:
+            await send_subscription_warning(query.message.chat_id, user_id, missing, context)
+        return
+
+    await query.answer()
     if data == "menu_home":
         await query.message.reply_text("🏠 Anasayfadasınız.")
     elif data.startswith("query_"):
@@ -89,13 +340,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "gsmtc": "GSM - TC (Örn: 05551234567)"
         }
         s_name = titles.get(q_type, "Sorgu Bilgisi")
-        
-        await query.message.reply_text(
-            f"🔍 <b>{q_type.upper()} Sorgulama Ekranı</b>\n\nLütfen aratmak istediğiniz bilgiyi gönderin:\n👉 <i>{s_name}</i>",
-            parse_mode="HTML"
-        )
+        await query.message.reply_text(f"🔍 <b>{q_type.upper()} Sorgulama Ekranı</b>\n\nLütfen aratmak istediğiniz bilgiyi gönderin:\n👉 <i>{s_name}</i>", parse_mode="HTML")
 
-# Metin içi HTML Formatlayıcı
+# HTML Biçimlendirme
 def format_data_text(data, indent=0):
     text = ""
     prefix = "  " * indent
@@ -116,74 +363,43 @@ def format_data_text(data, indent=0):
                 text += f"{prefix}• <code>{item_safe}</code>\n"
     return text
 
-# HTML Dosya Görünümü Tasarımı (Şık Dark Tema)
 def generate_html_file(q_type, data, count):
     rendered_body = format_data_text(data)
-    html_content = f"""<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AraştırX - {q_type.upper()} Sorgu Raporu</title>
+    <title>AraştırX - {q_type.upper()} Raporu</title>
     <style>
-        body {{
-            background-color: #0d1117;
-            color: #c9d1d9;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-        }}
-        .container {{
-            max-width: 900px;
-            margin: 0 auto;
-            background: #161b22;
-            padding: 25px;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-            border: 1px solid #30363d;
-        }}
-        h2 {{
-            color: #58a6ff;
-            border-bottom: 2px solid #21262d;
-            padding-bottom: 10px;
-            margin-top: 0;
-        }}
-        .count-badge {{
-            display: inline-block;
-            background-color: #238636;
-            color: #ffffff;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-weight: bold;
-            font-size: 14px;
-            margin-bottom: 15px;
-        }}
-        pre {{
-            background-color: #0d1117;
-            padding: 15px;
-            border-radius: 8px;
-            border: 1px solid #30363d;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            font-size: 14px;
-            line-height: 1.5;
-        }}
-        b {{ color: #79c0ff; }}
-        code {{ color: #7ee787; font-family: monospace; }}
+        body {{ background-color: #0d1117; color: #c9d1d9; font-family: sans-serif; padding: 20px; }}
+        .container {{ max-width: 900px; margin: 0 auto; background: #161b22; padding: 25px; border-radius: 12px; border: 1px solid #30363d; }}
+        h2 {{ color: #58a6ff; border-bottom: 2px solid #21262d; padding-bottom: 10px; }}
+        pre {{ background-color: #0d1117; padding: 15px; border-radius: 8px; border: 1px solid #30363d; white-space: pre-wrap; }}
+        b {{ color: #79c0ff; }} code {{ color: #7ee787; }}
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>🔍 AraştırX | {q_type.upper()} Sorgu Sonuçları</h2>
-        {f'<div class="count-badge">Toplam Kayıt: {count}</div>' if count is not None else ''}
+        <h2>🔍 AraştırX | {q_type.upper()} Sonuçları</h2>
         <pre>{rendered_body}</pre>
     </div>
 </body>
 </html>"""
-    return html_content
 
-# 5. Gelen Mesajları ve API İsteklerini İşleme
+# --- 6. MESAJ İŞLEME VE API SORGUSU ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    register_user(user_id)
+
+    # Kanal Abonelik Kontrolü
+    is_ok, missing = await check_channel_subscription(user_id, context)
+    if not is_ok:
+        if missing == ["BANNED"]:
+            await update.message.reply_text("⛔ <b>Banlandınız!</b>\nZorunlu kanallardan 3 kez ayrıldığınız için bota erişiminiz tamamen engellenmiştir.", parse_mode="HTML")
+        else:
+            await send_subscription_warning(update.effective_chat.id, user_id, missing, context)
+        return
+
     if context.user_data.get('waiting_for_query'):
         query_text = update.message.text.strip()
         q_type = context.user_data.get('current_query_type', 'islem')
@@ -194,12 +410,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             base_api = "http://arastir.vip/api"
             params = {}
-            
             if q_type == "adsoyad":
                 parts = query_text.split(" ", 1)
                 params['ad'] = parts[0]
-                if len(parts) > 1:
-                    params['soyad'] = parts[1]
+                if len(parts) > 1: params['soyad'] = parts[1]
                 endpoint = f"{base_api}/adsoyad.php"
             elif q_type == "gsmtc":
                 params['gsm'] = query_text
@@ -212,34 +426,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if response.status_code == 200:
                 res_json = response.json()
-                
                 if res_json.get("success"):
                     data = res_json.get("data")
                     count = res_json.get("count", None)
-                    
                     raw_formatted = format_data_text(data)
                     
                     sonuc_mesaji = f"✅ <b>Sorgu Başarılı ({q_type.upper()})</b>\n"
-                    if count is not None:
-                        sonuc_mesaji += f"📊 <b>Bulunan Kayıt:</b> <code>{count}</code>\n"
+                    if count is not None: sonuc_mesaji += f"📊 <b>Bulunan Kayıt:</b> <code>{count}</code>\n"
                     sonuc_mesaji += "━━━━━━━━━━━━━━━━━━\n" + raw_formatted + "━━━━━━━━━━━━━━━━━━"
                     
-                    # Telegram limitini (4000 Karakter) aşarsa metni KESME; Tamamını HTML Dosyası Yap!
                     if len(sonuc_mesaji) > 3500:
                         full_html = generate_html_file(q_type, data, count)
                         html_bytes = io.BytesIO(full_html.encode('utf-8'))
                         html_bytes.name = f"ArastirX_{q_type}_{query_text}.html"
                         
-                        caption_text = (
-                            f"✅ <b>Sorgu Başarılı ({q_type.upper()})</b>\n"
-                            f"📊 <b>Bulunan Kayıt:</b> <code>{count if count else 'Çoklu'}</code>\n\n"
-                            f"📄 <i>Veri boyutu Telegram mesaj sınırını aştığı için sonuçlar eksiksiz olarak <b>HTML Dosyası</b> formatında hazırlandı.</i>\n"
-                            f"👉 Dosyaya tıklayarak tarayıcında açabilirsin."
-                        )
-                        
                         await update.message.reply_document(
                             document=html_bytes,
-                            caption=caption_text,
+                            caption=f"✅ <b>Sorgu Başarılı ({q_type.upper()})</b>\n📄 <i>Sonuçlar tam ve kesintisiz olarak <b>HTML Dosyası</b> formatında iletildi.</i>",
                             parse_mode="HTML"
                         )
                     else:
@@ -253,7 +456,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             err_str = html.escape(str(e))
             await update.message.reply_text(f"❌ Sistem hatası oluştu: {err_str}", parse_mode="HTML")
-            
     else:
         await update.message.reply_text("Menüyü açmak için /start yazabilirsin.")
 
@@ -261,8 +463,16 @@ if __name__ == '__main__':
     keep_alive()
     
     application = ApplicationBuilder().token(TOKEN).build()
+    
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("panel", panel_command))
+    application.add_handler(CommandHandler("kanal_ekle", add_channel_command))
+    application.add_handler(CommandHandler("kanal_sil", del_channel_command))
+    application.add_handler(CommandHandler("kullanicilar", users_list_command))
+    application.add_handler(CommandHandler("unban", unban_command))
+    application.add_handler(CommandHandler("duyuru", broadcast_command))
+    application.add_handler(CommandHandler("duyuru_iptal", cancel_broadcast_command))
+    
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
