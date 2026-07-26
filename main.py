@@ -5,6 +5,7 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 ADMIN_ID = 6073294253
+TOKEN = "8646358320:AAEj6rlEpCxX1aLOXspgbsTNpVaYtvvGrbE"
 
 # 1. Render Port Ayarı İçin Web Sunucusu
 app = Flask('')
@@ -90,7 +91,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
-# Yardımcı Fonksiyon: JSON Verisini Güzelce Yazdırma
+# Yardımcı Fonksiyon: JSON Verisini Düzenli Formatlama
 def format_data(data, indent=0):
     text = ""
     prefix = "  " * indent
@@ -121,7 +122,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             base_api = "http://arastir.vip/api"
             params = {}
             
-            # API Dokümantasyonundaki Parametre Kuralları
             if q_type == "adsoyad":
                 parts = query_text.split(" ", 1)
                 params['ad'] = parts[0]
@@ -152,7 +152,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     sonuc_mesaji += format_data(data)
                     sonuc_mesaji += "━━━━━━━━━━━━━━━━━━"
                     
-                    # Telegram mesaj uzunluk sınırını kontrol etme
                     if len(sonuc_mesaji) > 4000:
                         sonuc_mesaji = sonuc_mesaji[:3900] + "\n\n⚠️ *Sonuç çok uzun olduğu için kısaltıldı.*"
                         
@@ -171,9 +170,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     keep_alive()
-    
-    # Yeni BotFather token'ını buraya tırnakların içine yapıştır kanka
-    TOKEN = "BURAYA_YENI_TOKENI_YAZ"
     
     application = ApplicationBuilder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
