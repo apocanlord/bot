@@ -21,10 +21,11 @@ TOKEN = "8646358320:AAEj6rlEpCxX1aLOXspgbsTNpVaYtvvGrbE"
 VIP_CONTACT = "@danistay"
 
 # --- MONGO DB BAĞLANTISI ---
+# Render/Heroku vb. ortamlarda MONGO_URI ortam değişkenini girin veya tırnak içine yazın
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://KULLANICI_ADI:SIFRE@cluster0.xxx.mongodb.net/?retryWrites=True&w=majority")
 
 try:
-    client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
+    client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     mongo_db = client["arastirx_bot"]
     users_col = mongo_db["users"]
     settings_col = mongo_db["settings"]
@@ -257,7 +258,7 @@ def build_profile_card(user):
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ana Menü", callback_data="menu_home")]])
     return card_text, keyboard
 
-# BİREBİR EKRAN GÖRÜNTÜSÜNDEKİ PANEL DÜZENİ
+# --- YÖNETİCİ PANELİ DÜZENİ ---
 def build_admin_panel():
     today_str = date.today().isoformat()
     cfg = get_settings()
@@ -273,10 +274,11 @@ def build_admin_panel():
     channels = cfg.get("channels", [])
     channels_str = "\n".join([f"• {c}" for c in channels]) if channels else "<i>Ekli kanal yok.</i>"
     must_join_status = "🟢 AÇIK" if cfg.get("must_join") else "🔴 KAPALI"
-    maint_status = "🔴 KAPALI" if not cfg.get("maintenance_mode") else "🟢 AÇIK"
+    maint_status = "🟢 AÇIK" if cfg.get("maintenance_mode") else "🔴 KAPALI"
     
-    maint_btn_txt = f"Bakım Modu: 🔴 K..." if not cfg.get("maintenance_mode") else "Bakım Modu: 🟢 A..."
-    must_join_btn_txt = f"Kanal Şartı: {must_join_status}"
+    # Buton metinleri kırpılmaması için net ve kısa tutuldu
+    maint_btn_txt = "Bakım: 🟢 AÇIK" if cfg.get("maintenance_mode") else "Bakım: 🔴 KAPALI"
+    must_join_btn_txt = "Şart: 🟢 AÇIK" if cfg.get("must_join") else "Şart: 🔴 KAPALI"
 
     panel_text = (
         "⚙️ <b>AraştırX | Yönetici Paneli</b>\n"
@@ -288,9 +290,8 @@ def build_admin_panel():
         "━━━━━━━━━━━━━━━━━━"
     )
     
-    # EKRAN GÖRÜNTÜSÜNDEKİ BİREBİR BUTON DİZİLİMİ
     keyboard = [
-        [InlineKeyboardButton("👑 VIP Ver / Süre T...", callback_data="btn_add_vip"), InlineKeyboardButton("❌ VIP Kaldır", callback_data="btn_del_vip")],
+        [InlineKeyboardButton("👑 VIP Ver", callback_data="btn_add_vip"), InlineKeyboardButton("❌ VIP Kaldır", callback_data="btn_del_vip")],
         [InlineKeyboardButton(maint_btn_txt, callback_data="toggle_maintenance"), InlineKeyboardButton(must_join_btn_txt, callback_data="toggle_channel_req")],
         [InlineKeyboardButton("➕ Kanal Ekle", callback_data="btn_add_channel"), InlineKeyboardButton("➖ Kanal Sil", callback_data="btn_del_channel")],
         [InlineKeyboardButton("📢 Duyuru Gönder", callback_data="btn_broadcast"), InlineKeyboardButton("👥 Kullanıcı Listesi", callback_data="btn_user_list")],
@@ -313,7 +314,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if cfg.get("maintenance_mode") and user_id != ADMIN_ID:
         try:
-            msg = await update.message.reply_text("⚙️ <b>SİSTEM BAKIMDA!</b>", parse_mode="HTML")
+            msg = await update.message.reply_text("⚙️ <b>SİSTEM BAKIMDA!</b>\nŞu an bakım modundayız, lütfen daha sonra tekrar deneyin.", parse_mode="HTML")
             asyncio.create_task(delete_message_safe(msg, 5))
         except Exception: pass
         return
@@ -462,14 +463,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             elif data == "btn_user_list":
-                await query.answer("👥 Liste hazırlanıyor...")
-                all_users = list(users_col.find({}))
-                txt = f"👥 <b>KULLANICI LİSTESİ ({len(all_users)} Kişi)</b>\n━━━━━━━━━━━━━━━━━━\n"
-                for idx, u in enumerate(all_users[:50], 1): # İlk 50 kişi
-                    uname = f"@{u.get('username')}" if u.get('username') else "Yok"
-                    txt += f"{idx}. <code>{u.get('user_id')}</code> | {uname} | VIP: {u.get('is_vip', False)}\n"
-                if len(all_users) > 50:
-                    txt += f"\n<i>...ve {len(all_users) - 50} kullanıcı daha.</i>"
+                await query.answer("👥 Liste çekiliyor...")
+                try:
+                    all_users = list(users_col.find({}))
+                    txt = f"👥 <b>KULLANICI LİSTESİ ({len(all_users)} Kişi)</b>\n━━━━━━━━━━━━━━━━━━\n"
+                    for idx, u in enumerate(all_users[:50], 1):
+                        uname = f"@{u.get('username')}" if u.get('username') else "Yok"
+                        txt += f"{idx}. <code>{u.get('user_id')}</code> | {uname} | VIP: {u.get('is_vip', False)}\n"
+                    if len(all_users) > 50:
+                        txt += f"\n<i>...ve {len(all_users) - 50} kullanıcı daha.</i>"
+                except Exception as e:
+                    txt = f"⚠️ Kullanıcı listesi alınamadı: {e}"
+                
                 kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Panele Dön", callback_data="admin_back")]])
                 await query.edit_message_text(txt, parse_mode="HTML", reply_markup=kb)
                 return
@@ -485,7 +490,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 new_val = not cfg.get("maintenance_mode", False)
                 update_settings({"maintenance_mode": new_val})
                 text, keyboard = build_admin_panel()
-                await query.answer("Bakım modu değiştirildi!")
+                status_msg = "Bakım Modu AÇILDI 🟢" if new_val else "Bakım Modu KAPATILDI 🔴"
+                await query.answer(status_msg, show_alert=True)
                 await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
                 return
 
@@ -493,7 +499,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 new_val = not cfg.get("must_join", True)
                 update_settings({"must_join": new_val})
                 text, keyboard = build_admin_panel()
-                await query.answer("Kanal şartı değiştirildi!")
+                status_msg = "Kanal Şartı AÇILDI 🟢" if new_val else "Kanal Şartı KAPATILDI 🔴"
+                await query.answer(status_msg, show_alert=True)
                 await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
                 return
 
