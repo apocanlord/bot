@@ -1,6 +1,6 @@
 from flask import Flask
 import threading
-from curl_cffi import requests
+import requests
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
@@ -90,35 +90,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ad = parts[0]
                 soyad = parts[1] if len(parts) > 1 else ""
                 api_url = f"https://arastir.vip/adsoyad.php?ad={requests.utils.quote(ad)}&soyad={requests.utils.quote(soyad)}"
-            elif q_type == "tc":
-                api_url = f"https://arastir.vip/tc.php?tc={requests.utils.quote(query_text)}"
-            elif q_type == "isyeri":
-                api_url = f"https://arastir.vip/isyeri.php?tc={requests.utils.quote(query_text)}"
-            elif q_type == "adres":
-                api_url = f"https://arastir.vip/adres.php?tc={requests.utils.quote(query_text)}"
-            elif q_type == "aile":
-                api_url = f"https://arastir.vip/aile.php?tc={requests.utils.quote(query_text)}"
-            elif q_type == "sulale":
-                api_url = f"https://arastir.vip/sulale.php?tc={requests.utils.quote(query_text)}"
-            elif q_type == "cocuk":
-                api_url = f"https://arastir.vip/cocuk.php?tc={requests.utils.quote(query_text)}"
-            elif q_type == "tcgsm":
-                api_url = f"https://arastir.vip/tcgsm.php?tc={requests.utils.quote(query_text)}"
+            elif q_type in ["tc", "tcgsm", "cocuk", "aile", "sulale", "isyeri", "adres"]:
+                api_url = f"https://arastir.vip/{q_type}.php?tc={requests.utils.quote(query_text)}"
             elif q_type == "gsmtc":
                 api_url = f"https://arastir.vip/gsmtc.php?gsm={requests.utils.quote(query_text)}"
             else:
                 api_url = f"https://arastir.vip/{q_type}.php?q={requests.utils.quote(query_text)}"
             
-            # İstek atılıyor
-            response = requests.get(api_url, impersonate="chrome", timeout=15)
+            response = requests.get(api_url, timeout=15)
             
             if response.status_code == 200:
-                try:
-                    res_data = response.json()
-                except:
-                    # HTML dönerse Cloudflare engelinin detayını görmek için ilk 200 karakteri yazdıracağız
-                    await update.message.reply_text(f"❌ Cloudflare Engeli Aşırıdı / HTML Döndü:\n{response.text[:200]}")
-                    return
+                res_data = response.json()
                 
                 if isinstance(res_data, list) and len(res_data) > 0:
                     res_data = res_data[0]
@@ -133,7 +115,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 await update.message.reply_text(sonuc_mesaji, parse_mode="Markdown")
             else:
-                await update.message.reply_text(f"❌ API Sunucu Hatası: {response.status_code}\nİçerik: {response.text[:100]}")
+                await update.message.reply_text(f"❌ API Sunucu Hatası: {response.status_code}")
                 
         except Exception as e:
             await update.message.reply_text(f"❌ Bağlantı hatası oluştu: {str(e)}")
