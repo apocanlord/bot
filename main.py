@@ -12,6 +12,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 from telegram.error import TelegramError
 
 ADMIN_ID = 6073294253
+LOG_CHANNEL_ID = -1004400643128  # Log Kanal ID'niz
 TOKEN = "8646358320:AAEj6rlEpCxX1aLOXspgbsTNpVaYtvvGrbE"
 
 # --- VERİTABANI YÖNETİMİ (KORUMALI JSON) ---
@@ -75,14 +76,24 @@ def keep_alive():
     t = threading.Thread(target=run_flask)
     t.start()
 
+# --- YARDIMCI LOG FONKSİYONU ---
+async def send_log(context: ContextTypes.DEFAULT_TYPE, log_text: str):
+    """Log kanalına mesaj gönderir."""
+    if LOG_CHANNEL_ID:
+        try:
+            await context.bot.send_message(chat_id=LOG_CHANNEL_ID, text=log_text, parse_mode="HTML")
+        except Exception as e:
+            print(f"Log gönderme hatası: {e}")
+
 # --- YARDIMCI FONKSİYONLAR ---
-def register_user(user):
-    """Kullanıcıyı ve username/tarih bilgilerini eksiksiz kaydeder."""
+async def register_user(user, context: ContextTypes.DEFAULT_TYPE = None):
+    """Kullanıcıyı ve username/tarih bilgilerini eksiksiz kaydeder, ilk girişte log atar."""
     if not user:
         return
     
     user_id = user.id
     username = user.username if user.username else None
+    first_name = user.first_name if user.first_name else ""
     uid_str = str(user_id)
     today_str = date.today().isoformat()
 
@@ -93,6 +104,19 @@ def register_user(user):
             "username": username
         }
         save_data(db)
+        
+        # Log kanalına bildirim
+        if context:
+            uname_str = f"@{username}" if username else "<i>Yok</i>"
+            log_msg = (
+                "👤 <b>YENİ KULLANICI KATILDI!</b>\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                f"<b>İsim:</b> {html.escape(first_name)}\n"
+                f"<b>Kullanıcı Adı:</b> {uname_str}\n"
+                f"<b>ID:</b> <code>{user_id}</code>\n"
+                f"<b>Tarih:</b> <code>{today_str}</code>"
+            )
+            await send_log(context, log_msg)
     else:
         updated = False
         if "created_at" not in db["users"][uid_str]:
@@ -109,7 +133,6 @@ async def check_channel_subscription(user_id, context: ContextTypes.DEFAULT_TYPE
     uid_str = str(user_id)
     user_info = db["users"].get(uid_str, {"is_banned": False})
 
-    # Eğer banlıysa engelle
     if user_info.get("is_banned"):
         return False, ["BANNED"]
 
@@ -148,10 +171,9 @@ async def send_subscription_warning(chat_id, user_id, missing, context: ContextT
 
 # --- 2. START KOMUTU & ANA MENÜ ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    register_user(update.effective_user)
+    await register_user(update.effective_user, context)
     user_id = update.effective_user.id
 
-    # Bakım modu kontrolü (Admin hariç)
     if db.get("maintenance_mode") and user_id != ADMIN_ID:
         await update.message.reply_text("⚙️ <b>SİSTEM BAKIMDA!</b>\n\nBot şu an güncelleme ve bakım çalışması nedeniyle geçici olarak hizmet dışıdır. Lütfen daha sonra tekrar deneyiniz.", parse_mode="HTML")
         return
@@ -231,7 +253,7 @@ def build_banned_users_menu():
     text = f"🚫 <b>Banlı Kullanıcı Listesi ({len(banned_list)} Kullanıcı):</b>\n\nAşağıdaki listeden banını kaldırmak istediğiniz kullanıcının butonuna basabilirsiniz:"
     keyboard = []
     
-    for uid in banned_list[:40]:  # Telegram buton limiti için ilk 40 kullanıcı
+    for uid in banned_list[:40]:
         u_data = db["users"][uid]
         uname = u_data.get("username")
         label = f"🔓 @{uname} ({uid})" if uname else f"🔓 ID: {uid}"
@@ -241,7 +263,7 @@ def build_banned_users_menu():
     return text, InlineKeyboardMarkup(keyboard)
 
 async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    register_user(update.effective_user)
+    await register_user(update.effective_user, context)
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Bu komutu kullanma yetkiniz yok.")
         return
@@ -252,11 +274,10 @@ async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- 4. BUTON HANDLER ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    register_user(query.from_user)
+    await register_user(query.from_user, context)
     user_id = query.from_user.id
     data = query.data
 
-    # Bakım modu kontrolü (Admin hariç)
     if db.get("maintenance_mode") and user_id != ADMIN_ID:
         await query.answer("⚙️ Sistem bakımdadır! Lütfen daha sonra tekrar deneyiniz.", show_alert=True)
         return
@@ -278,6 +299,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text, keyboard = build_admin_panel()
             await query.answer("Bakım modu değiştirildi!")
             await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
+            st_str = "🟢 AÇIK" if db["maintenance_mode"] else "🔴 KAPALI"
+            await send_log(context, f"🛠️ <b>Bakım Modu Değiştirildi:</b> {st_str}")
             return
 
         elif data == "toggle_channel_req":
@@ -334,6 +357,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 db["users"][target_uid]["is_banned"] = False
                 save_data(db)
                 await query.answer("✅ Ban kaldırıldı!", show_alert=True)
+                await send_log(context, f"🔓 <b>BAN KALDIRILDI!</b>\n<b>Kullanıcı ID:</b> <code>{target_uid}</code>")
             else:
                 await query.answer("⚠️ Kullanıcı veritabanında bulunamadı.", show_alert=True)
             
@@ -460,11 +484,12 @@ def generate_html_file(q_type, data, count):
 
 # --- 5. MESAJ İŞLEME VE INTERAKTİF ADMIN İŞLEMLERİ ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    register_user(update.effective_user)
+    await register_user(update.effective_user, context)
     user_id = update.effective_user.id
     text_input = update.message.text.strip()
+    u_name = update.effective_user.username
+    u_str = f"@{u_name}" if u_name else "<i>Kullanıcı Adı Yok</i>"
 
-    # Bakım modu kontrolü (Admin hariç)
     if db.get("maintenance_mode") and user_id != ADMIN_ID:
         await update.message.reply_text("⚙️ <b>SİSTEM BAKIMDA!</b>\n\nBot şu an bakım çalışması nedeniyle hizmet dışıdır. Lütfen daha sonra tekrar deneyiniz.", parse_mode="HTML")
         return
@@ -486,6 +511,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 }
                 save_data(db)
                 await update.message.reply_text(f"⛔ <code>{text_input}</code> ID'li kullanıcı veritabanına eklenerek banlandı.", parse_mode="HTML")
+            
+            await send_log(context, f"⛔ <b>KULLANICI BANLANDI!</b>\n<b>Banlanan ID:</b> <code>{text_input}</code>")
             return
 
         elif action == 'add_channel':
@@ -550,6 +577,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['waiting_for_query'] = False
         wait_msg = await update.message.reply_text("⏳ Sorgulanıyor, lütfen bekleyin...", parse_mode="HTML")
         
+        # Log Kanalına Sorgu Logu Gönder
+        query_log = (
+            "🔍 <b>YENİ SORGU YAPILDI</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"<b>Kullanıcı:</b> {u_str}\n"
+            f"<b>ID:</b> <code>{user_id}</code>\n"
+            f"<b>Sorgu Türü:</b> <code>{q_type.upper()}</code>\n"
+            f"<b>Aratılan Metin:</b> <code>{html.escape(text_input)}</code>"
+        )
+        await send_log(context, query_log)
+
         try:
             base_api = "http://arastir.vip/api"
             params = {}
