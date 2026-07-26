@@ -14,29 +14,46 @@ from telegram.error import TelegramError
 ADMIN_ID = 6073294253
 TOKEN = "8646358320:AAEj6rlEpCxX1aLOXspgbsTNpVaYtvvGrbE"
 
-# --- VERİTABANI YÖNETİMİ (JSON & VERİ KORUMA) ---
+# --- VERİTABANI YÖNETİMİ (KORUMALI JSON) ---
 DATA_FILE = "bot_data.json"
 
+# HER SIFIRLANMADA/GÜNCELLEMEDE ASLA SİLİNMEYECEK SABİT KANALLAR:
+DEFAULT_CHANNELS = ["@arastirduyuru", "@arastirzorunlu"] 
+
 def load_data():
+    data = {
+        "users": {},
+        "channels": list(DEFAULT_CHANNELS), # Varsayılan kanallar her zaman hazır bulunur
+        "must_join": True
+    }
+    
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if "users" not in data: data["users"] = {}
-                if "channels" not in data: data["channels"] = []
-                if "must_join" not in data: data["must_join"] = True
-                return data
+                saved_data = json.load(f)
+                
+                # Kullanıcıları yükle
+                if "users" in saved_data: 
+                    data["users"] = saved_data["users"]
+                
+                # Kanalları yükle ve varsayılanlarla birleştir (Çift kayıt olmaması için set kullanıyoruz)
+                if "channels" in saved_data:
+                    combined_channels = list(set(saved_data["channels"] + DEFAULT_CHANNELS))
+                    data["channels"] = combined_channels
+                    
+                if "must_join" in saved_data: 
+                    data["must_join"] = saved_data["must_join"]
         except Exception:
             pass
-    return {
-        "users": {},        # "user_id": {"warnings": 0, "is_banned": False, "created_at": "YYYY-MM-DD", "username": "kullanici_adi"}
-        "channels": [],     # ["@kanal1", "@kanal2"]
-        "must_join": True   # Kanal zorunluluğu
-    }
+            
+    return data
 
 def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    try:
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"Veri kaydetme hatası: {e}")
 
 db = load_data()
 duyuru_iptal_flag = False
@@ -76,7 +93,6 @@ def register_user(user):
         }
         save_data(db)
     else:
-        # Var olan kullanıcı verilerini güncelle / koru
         updated = False
         if "created_at" not in db["users"][uid_str]:
             db["users"][uid_str]["created_at"] = today_str
@@ -89,7 +105,6 @@ def register_user(user):
             save_data(db)
 
 async def check_channel_subscription(user_id, context: ContextTypes.DEFAULT_TYPE):
-    """Kullanıcının zorunlu kanallara üye olup olmadığını kontrol eder."""
     if not db["must_join"] or not db["channels"]:
         return True, []
 
@@ -177,7 +192,7 @@ def build_main_menu():
     ]
     return text, InlineKeyboardMarkup(keyboard)
 
-# --- 3. YÖNETİCİ PANELİ (GÖSTERGE PANELİ - DYNAMIC DASHBOARD) ---
+# --- 3. YÖNETİCİ PANELİ ---
 def build_admin_panel():
     today_str = date.today().isoformat()
     total_users = len(db["users"])
@@ -224,7 +239,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     data = query.data
 
-    # A) Kullanıcı Onay Butonu
     if data == "check_subs":
         await query.answer()
         is_ok, missing = await check_channel_subscription(user_id, context)
@@ -235,7 +249,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_subscription_warning(query.message.chat_id, user_id, missing, context)
         return
 
-    # B) Yönetici Buton Modülü
     if user_id == ADMIN_ID:
         if data == "toggle_channel_req":
             db["must_join"] = not db["must_join"]
@@ -313,7 +326,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Duyuru iptal talebi iletildi!", show_alert=True)
             return
 
-    # C) Kullanıcı Kanal Kontrolü
     is_ok, missing = await check_channel_subscription(user_id, context)
     if not is_ok:
         await query.answer("⚠️ Zorunlu kanallara katılmalısınız!", show_alert=True)
@@ -323,7 +335,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_subscription_warning(query.message.chat_id, user_id, missing, context)
         return
 
-    # D) Kullanıcı Sorgu Menü Butonları
     await query.answer()
     if data.startswith("query_"):
         q_type = data.split("_")[1]
@@ -355,7 +366,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text, keyboard = build_main_menu()
         await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
 
-# HTML Biçimlendirme
 def format_data_text(data, indent=0):
     text = ""
     prefix = "  " * indent
@@ -405,7 +415,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text_input = update.message.text.strip()
 
-    # Admin Buton İşlemleri
     if user_id == ADMIN_ID and context.user_data.get('admin_action'):
         action = context.user_data.get('admin_action')
         context.user_data['admin_action'] = None
@@ -469,7 +478,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await status_msg.edit_text(f"✅ <b>Duyuru Tamamlandı!</b>\n\n📊 Toplam: {total}\n✅ Gönderilen: {success}\n❌ Ulaşılamayan: {failed}", parse_mode="HTML")
             return
 
-    # Normal Kullanıcı Kanal Kontrolü
     is_ok, missing = await check_channel_subscription(user_id, context)
     if not is_ok:
         if missing == ["BANNED"]:
@@ -478,7 +486,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_subscription_warning(update.effective_chat.id, user_id, missing, context)
         return
 
-    # Sorgu İşlemleri
     if context.user_data.get('waiting_for_query'):
         q_type = context.user_data.get('current_query_type', 'islem')
         context.user_data['waiting_for_query'] = False
