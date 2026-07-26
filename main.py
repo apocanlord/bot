@@ -18,12 +18,18 @@ TOKEN = "8646358320:AAEj6rlEpCxX1aLOXspgbsTNpVaYtvvGrbE"
 DATA_FILE = "bot_data.json"
 
 # HER SIFIRLANMADA/GÜNCELLEMEDE ASLA SİLİNMEYECEK SABİT KANALLAR:
-DEFAULT_CHANNELS = ["@arastirduyuru", "@arastirzorunlu"] 
+DEFAULT_CHANNELS = ["@arastirduyuru", "@arastirzorunlu"]
+
+# SUNUCU SIFIRLANSA BİLE KAYBOLMASINI İSTEMEDİĞİN ÖNCEDEN EKLİ KULLANICILAR:
+# (Varsa bilinen kullanıcı ID'lerini buraya ekleyebilirsin, boş kalsa bile koruma aktiftir)
+DEFAULT_USERS = {
+    # "6073294253": {"warnings": 0, "is_banned": False, "created_at": "2026-07-26", "username": "admin"}
+}
 
 def load_data():
     data = {
-        "users": {},
-        "channels": list(DEFAULT_CHANNELS), # Varsayılan kanallar her zaman hazır bulunur
+        "users": dict(DEFAULT_USERS), # Varsayılan kullanıcılar silinmez
+        "channels": list(DEFAULT_CHANNELS),
         "must_join": True
     }
     
@@ -32,11 +38,11 @@ def load_data():
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 saved_data = json.load(f)
                 
-                # Kullanıcıları yükle
-                if "users" in saved_data: 
-                    data["users"] = saved_data["users"]
+                # Kaydedilmiş kullanıcıları yükle ve varsayılanlarla birleştir
+                if "users" in saved_data:
+                    data["users"].update(saved_data["users"])
                 
-                # Kanalları yükle ve varsayılanlarla birleştir (Çift kayıt olmaması için set kullanıyoruz)
+                # Kanalları yükle ve varsayılanlarla birleştir
                 if "channels" in saved_data:
                     combined_channels = list(set(saved_data["channels"] + DEFAULT_CHANNELS))
                     data["channels"] = combined_channels
