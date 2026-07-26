@@ -23,7 +23,7 @@ def keep_alive():
 # 2. Start Komutu (Görseldeki Tam Liste Alt Alta Menü)
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     menu_text = (
-        "🔍 **@arastirxbot** Araştırma danışma Paneline Hoş Geldiniz!\n\n"
+        "🔍 **@arastirxbot** Araştırma ve Sorgu Paneline Hoş Geldiniz!\n\n"
         "İşlem yapmak için aşağıdaki menüden bir kategori seçin:"
     )
     
@@ -133,10 +133,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "broadcast":
         await query.message.reply_text("📢 Duyuru göndermek için metni yazın.")
 
-# 5. API Entegrasyonu ve Veri İşleme
+# 5. Doğru Parametre Yapısıyla API Entegrasyonu
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('waiting_for_query'):
-        query_text = update.message.text
+        query_text = update.message.text.strip()
         q_type = context.user_data.get('current_query_type', 'islem')
         
         context.user_data['waiting_for_query'] = False
@@ -145,7 +145,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         try:
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-            api_url = f"https://arastir.vip/{q_type}.php?q={requests.utils.quote(query_text)}"
+            
+            # Sorgu tipine göre doğru parametreleri eşleştiriyoruz
+            if q_type == "adsoyad":
+                parts = query_text.split(" ", 1)
+                ad = parts[0]
+                soyad = parts[1] if len(parts) > 1 else ""
+                api_url = f"https://arastir.vip/adsoyad.php?ad={requests.utils.quote(ad)}&soyad={requests.utils.quote(soyad)}"
+            elif q_type in ["tc", "tcgsm", "cocuk", "aile", "sulale", "isyeri", "adres"]:
+                api_url = f"https://arastir.vip/{q_type}.php?tc={requests.utils.quote(query_text)}"
+            elif q_type == "gsmtc":
+                api_url = f"https://arastir.vip/gsmtc.php?gsm={requests.utils.quote(query_text)}"
+            else:
+                api_url = f"https://arastir.vip/{q_type}.php?q={requests.utils.quote(query_text)}"
             
             response = requests.get(api_url, headers=headers, timeout=15)
             
