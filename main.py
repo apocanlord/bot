@@ -26,7 +26,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "İşlem yapmak için aşağıdaki menüden bir kategori seçin:"
     )
     
-    # Ekran görüntündeki butonların birebir aynısı (alt alta)
     keyboard = [
         [InlineKeyboardButton("🏠 Anasayfa", callback_data="menu_home")],
         [InlineKeyboardButton("🤵 Ad Soyad Sorgula", callback_data="query_adsoyad")],
@@ -133,7 +132,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "broadcast":
         await query.message.reply_text("📢 Duyuru göndermek için metni yazın.")
 
-# 5. Kullanıcının Girdiği Veriyi Yakalama
+# 5. Kullanıcının Girdiği Veriyi Anında İşleme ve Sonuç Döndürme
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('waiting_for_query'):
         query_text = update.message.text
@@ -141,12 +140,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         context.user_data['waiting_for_query'] = False
         
-        await update.message.reply_text(
-            f"🔍 **Sorgu Türü:** `{q_type.upper()}`\n"
-            f"📌 **Girilen Veri:** `{query_text}`\n\n"
-            "⏳ Veritabanında taranıyor, lütfen bekleyin...",
-            parse_mode="Markdown"
+        # 📌 Bekletme yapmadan doğrudan sonucu burada gösteriyoruz
+        # Kendi API sorgunu veya veri çekme kodunu bu bloğun içine yazabilirsin
+        sonuc_metni = (
+            f"✅ **Sorgu Başarılı**\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📌 **Tür:** `{q_type.upper()}`\n"
+            f"🔎 **Aranan:** `{query_text}`\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📄 **Sonuç:** (Bulunan veriler buraya gelecektir)"
         )
+        
+        await update.message.reply_text(sonuc_metni, parse_mode="Markdown")
     else:
         await update.message.reply_text("Menüyü açmak için /start yazabilirsin.")
 
