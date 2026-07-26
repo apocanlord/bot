@@ -1,10 +1,12 @@
-from flask import Flask
+import os
 import threading
 import requests
+from flask import Flask
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 ADMIN_ID = 6073294253
+# Yeni Token'ın Tamamı
 TOKEN = "8646358320:AAEj6rlEpCxX1aLOXspgbsTNpVaYtvvGrbE"
 
 # 1. Render Port Ayarı İçin Web Sunucusu
@@ -15,7 +17,9 @@ def home():
     return "AraştırX | Analiz Botu Aktif ve Çalışıyor!"
 
 def run_flask():
-    app.run(host='0.0.0.0', port=8080)
+    # Render'ın dinamik portunu okur, port çökmesini önler
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     t = threading.Thread(target=run_flask)
