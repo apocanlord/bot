@@ -9,7 +9,6 @@ import requests
 from flask import Flask
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-from telegram.error import TelegramError
 
 ADMIN_ID = 6073294253
 LOG_CHANNEL_ID = -1004400643128
@@ -27,7 +26,6 @@ def load_data():
         "must_join": True,
         "maintenance_mode": False
     }
-    
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
@@ -50,12 +48,12 @@ def save_data(data):
 db = load_data()
 duyuru_iptal_flag = False
 
-# --- 1. Render Web Sunucusu ---
+# --- WEB SUNUCUSU (RENDER) ---
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "AraştırX | Analiz Botu Aktif ve Çalışıyor!"
+    return "AraştırX | Analiz Botu Aktif!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -65,28 +63,34 @@ def keep_alive():
     t = threading.Thread(target=run_flask)
     t.start()
 
-# --- YARDIMCI FONKSİYONLAR & LOG ---
+# --- YARDIMCI VE TEMİZLİK FONKSİYONLARI ---
+async def delete_message_safe(message, delay=0):
+    """Belirtilen mesajı güvenli şekilde siler."""
+    if delay > 0:
+        await asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
 async def send_log(context: ContextTypes.DEFAULT_TYPE, log_text: str):
     if LOG_CHANNEL_ID:
         try:
             await context.bot.send_message(chat_id=LOG_CHANNEL_ID, text=log_text, parse_mode="HTML")
-        except Exception as e:
-            print(f"Log gönderme hatası: {e}")
+        except Exception:
+            pass
 
 def check_and_reset_daily_limit(user_id_str):
-    """Kullanıcının günlük sorgu hakkını gün değiştiyse sıfırlar ve VIP süresini kontrol eder."""
     today_str = date.today().isoformat()
     user = db["users"].get(user_id_str)
     if not user:
         return
 
-    # Günlük Sayaç Sıfırlama
     if user.get("last_query_date") != today_str:
         user["last_query_date"] = today_str
         user["daily_queries"] = 0
         save_data(db)
 
-    # VIP Süre Kontrolü
     if user.get("is_vip") and user.get("vip_until"):
         try:
             vip_date = datetime.strptime(user["vip_until"], "%Y-%m-%d").date()
@@ -136,7 +140,6 @@ async def register_user(user, referrer_id=None, context: ContextTypes.DEFAULT_TY
             )
             await send_log(context, log_msg)
     else:
-        # Bilgileri güncelle
         db["users"][uid_str]["username"] = username
         db["users"][uid_str]["first_name"] = first_name
         save_data(db)
@@ -167,50 +170,15 @@ async def check_channel_subscription(user_id, context: ContextTypes.DEFAULT_TYPE
 
     return True, []
 
-async def send_subscription_warning(chat_id, user_id, missing, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "⚠️ <b>ZORUNLU KANAL ÜYELİĞİ EKSİK!</b>\n\n"
-        "Bu botu kullanabilmek için aşağıdaki kanallara katılmış olmanız gerekmektedir.\n\n"
-        "Lütfen kanallara katıldıktan sonra <b>'✅ Katıldım, Onayla'</b> butonuna basın:"
-    )
-    
+def build_subscription_markup(missing):
     keyboard = []
     for ch in missing:
         clean_ch = ch.replace("@", "")
         keyboard.append([InlineKeyboardButton(f"📢 Katıl: {ch}", url=f"https://t.me/{clean_ch}")])
     keyboard.append([InlineKeyboardButton("✅ Katıldım, Onayla", callback_data="check_subs")])
+    return InlineKeyboardMarkup(keyboard)
 
-    await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
-
-# --- 2. START KOMUTU & ANA MENÜ ---
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Referans linki tespiti (örn: /start ref_123456)
-    referrer_id = None
-    if context.args and context.args[0].startswith("ref_"):
-        referrer_id = context.args[0].replace("ref_", "")
-
-    await register_user(update.effective_user, referrer_id, context)
-    user_id = update.effective_user.id
-
-    if db.get("maintenance_mode") and user_id != ADMIN_ID:
-        await update.message.reply_text("⚙️ <b>SİSTEM BAKIMDA!</b>\n\nBot şu an bakım çalışması nedeniyle hizmet dışıdır.", parse_mode="HTML")
-        return
-
-    if db["users"].get(str(user_id), {}).get("is_banned"):
-        await update.message.reply_text("⛔ <b>Sistemden Banlandınız!</b>", parse_mode="HTML")
-        return
-
-    is_ok, missing = await check_channel_subscription(user_id, context)
-    if not is_ok:
-        if missing == ["BANNED"]:
-            await update.message.reply_text("⛔ <b>Sistemden Banlandınız!</b>", parse_mode="HTML")
-            return
-        await send_subscription_warning(update.effective_chat.id, user_id, missing, context)
-        return
-
-    menu_text, keyboard = build_main_menu(user_id)
-    await update.message.reply_text(menu_text, parse_mode="HTML", reply_markup=keyboard)
-
+# --- MENÜLER ---
 def build_main_menu(user_id):
     u_data = db["users"].get(str(user_id), {})
     is_vip = u_data.get("is_vip", False) or (user_id == ADMIN_ID)
@@ -228,12 +196,11 @@ def build_main_menu(user_id):
         [InlineKeyboardButton("👥 Aile Sorgula", callback_data="query_aile"), InlineKeyboardButton("👥 Sülale Sorgula", callback_data="query_sulale")],
         [InlineKeyboardButton("👶 Çocuk Sorgula", callback_data="query_cocuk")],
         [InlineKeyboardButton("📱 TC-GSM Sorgula", callback_data="query_tcgsm"), InlineKeyboardButton("📱 GSM-TC Sorgula", callback_data="query_gsmtc")],
-        [InlineKeyboardButton("👤 Profesyonel Profil Kartı", callback_data="user_profile"), InlineKeyboardButton("🔗 Davet Et / Kazan", callback_data="user_ref")],
-        [InlineKeyboardButton("👑 VIP Satın Al / Destek", url=f"https://t.me/{VIP_CONTACT.replace('@','')}")]
+        [InlineKeyboardButton("👤 Profil Kartım", callback_data="user_profile"), InlineKeyboardButton("🔗 Davet Et / VIP Kazan", callback_data="user_ref")],
+        [InlineKeyboardButton("👑 VIP Satın Al / Fiyatlar", callback_data="vip_prices")]
     ]
     return text, InlineKeyboardMarkup(keyboard)
 
-# --- 3. PROFİL KARTI VE DAVET SİSTEMİ ---
 def build_profile_card(user):
     uid_str = str(user.id)
     u_data = db["users"].get(uid_str, {})
@@ -273,7 +240,6 @@ def build_profile_card(user):
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ana Menü", callback_data="menu_home")]])
     return card_text, keyboard
 
-# --- 4. YÖNETİCİ PANELİ ---
 def build_admin_panel():
     today_str = date.today().isoformat()
     total_users = len(db["users"])
@@ -288,36 +254,61 @@ def build_admin_panel():
     panel_text = (
         "⚙️ <b>AraştırX | Yönetici Paneli</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        f"📅 <b>Bugün Gelen Kullanıcı:</b> <code>{today_users}</code>\n"
-        f"📊 <b>Toplam Kullanıcı:</b> <code>{total_users}</code>\n"
-        f"👑 <b>VIP Kullanıcı:</b> <code>{vip_users}</code>\n"
-        f"🚫 <b>Banlı Kullanıcı:</b> <code>{banned_users}</code>\n"
-        f"🛠️ <b>Bakım Modu:</b> {maint_status}\n"
-        f"📢 <b>Kanal Zorunluluğu:</b> {must_join_status}\n\n"
-        f"📌 <b>Ekli Bulunan Kanallar:</b>\n{channels_str}\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "Yönetici işlemlerini aşağıdaki butonlardan yapabilirsiniz:"
+        f"📅 <b>Bugün Gelen:</b> <code>{today_users}</code> | 📊 <b>Toplam:</b> <code>{total_users}</code>\n"
+        f"👑 <b>VIP:</b> <code>{vip_users}</code> | 🚫 <b>Banlı:</b> <code>{banned_users}</code>\n"
+        f"🛠️ <b>Bakım Modu:</b> {maint_status} | 📢 <b>Kanal Şartı:</b> {must_join_status}\n\n"
+        f"📌 <b>Kanallar:</b>\n{channels_str}\n"
+        "━━━━━━━━━━━━━━━━━━"
     )
     
     keyboard = [
         [InlineKeyboardButton("👑 VIP Ver / Süre Tanımla", callback_data="btn_add_vip"), InlineKeyboardButton("❌ VIP Kaldır", callback_data="btn_del_vip")],
-        [InlineKeyboardButton(f"Bakım Modu: {maint_status}", callback_data="toggle_maintenance"), InlineKeyboardButton(f"Kanal Zorunluluğu: {must_join_status}", callback_data="toggle_channel_req")],
+        [InlineKeyboardButton(f"Bakım Modu: {maint_status}", callback_data="toggle_maintenance"), InlineKeyboardButton(f"Kanal Şartı: {must_join_status}", callback_data="toggle_channel_req")],
         [InlineKeyboardButton("➕ Kanal Ekle", callback_data="btn_add_channel"), InlineKeyboardButton("➖ Kanal Sil", callback_data="btn_del_channel")],
-        [InlineKeyboardButton("📢 Duyuru Gönder", callback_data="btn_broadcast"), InlineKeyboardButton("🛑 Duyuru İptal", callback_data="btn_cancel_broadcast")],
-        [InlineKeyboardButton("👥 Kullanıcı Listesi", callback_data="admin_users"), InlineKeyboardButton("⛔ Banla / Ban Kaldır", callback_data="btn_ban")]
+        [InlineKeyboardButton("📢 Duyuru Gönder", callback_data="btn_broadcast"), InlineKeyboardButton("👥 Kullanıcı Listesi", callback_data="admin_users")],
+        [InlineKeyboardButton("⛔ Banla / Ban Kaldır", callback_data="btn_ban")]
     ]
     return panel_text, InlineKeyboardMarkup(keyboard)
 
+# --- START & PANEL ---
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Kullanıcının attığı /start mesajını sil
+    asyncio.create_task(delete_message_safe(update.message))
+
+    referrer_id = None
+    if context.args and context.args[0].startswith("ref_"):
+        referrer_id = context.args[0].replace("ref_", "")
+
+    await register_user(update.effective_user, referrer_id, context)
+    user_id = update.effective_user.id
+
+    if db.get("maintenance_mode") and user_id != ADMIN_ID:
+        msg = await update.message.reply_text("⚙️ <b>SİSTEM BAKIMDA!</b>", parse_mode="HTML")
+        asyncio.create_task(delete_message_safe(msg, 5))
+        return
+
+    if db["users"].get(str(user_id), {}).get("is_banned"):
+        return
+
+    is_ok, missing = await check_channel_subscription(user_id, context)
+    if not is_ok:
+        text = "⚠️ <b>ZORUNLU KANAL ÜYELİĞİ EKSİK!</b>\n\nLütfen aşağıdaki kanallara katılıp onaylayın:"
+        await update.message.reply_text(text, parse_mode="HTML", reply_markup=build_subscription_markup(missing))
+        return
+
+    menu_text, keyboard = build_main_menu(user_id)
+    await update.message.reply_text(menu_text, parse_mode="HTML", reply_markup=keyboard)
+
 async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    asyncio.create_task(delete_message_safe(update.message))
     await register_user(update.effective_user, context=context)
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Bu komutu kullanma yetkiniz yok.")
         return
 
     text, keyboard = build_admin_panel()
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
 
-# --- 5. BUTON HANDLER ---
+# --- BUTON YÖNETİMİ ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await register_user(query.from_user, context=context)
@@ -325,44 +316,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if db.get("maintenance_mode") and user_id != ADMIN_ID:
-        await query.answer("⚙️ Sistem bakımdadır! Lütfen daha sonra tekrar deneyiniz.", show_alert=True)
+        await query.answer("⚙️ Sistem bakımdadır!", show_alert=True)
         return
 
     if data == "check_subs":
-        await query.answer()
         is_ok, missing = await check_channel_subscription(user_id, context)
         if is_ok:
-            # Referans Ödül Kontrolü (Abonelik onaylandığında verilir)
-            u_data = db["users"].get(str(user_id), {})
-            ref_id = u_data.get("referred_by")
-            if ref_id and ref_id in db["users"] and not u_data.get("ref_rewarded"):
-                db["users"][str(user_id)]["ref_rewarded"] = True
-                db["users"][ref_id]["invites_count"] = db["users"][ref_id].get("invites_count", 0) + 1
-                inv_count = db["users"][ref_id]["invites_count"]
-                
-                # 10 Kişiye Ulaşınca 3 Gün VIP
-                if inv_count >= 10 and not db["users"][ref_id].get("is_vip"):
-                    db["users"][ref_id]["is_vip"] = True
-                    until_date = (date.today() + timedelta(days=3)).isoformat()
-                    db["users"][ref_id]["vip_until"] = until_date
-                    
-                    try:
-                        await context.bot.send_message(
-                            chat_id=int(ref_id),
-                            text="🎉 <b>TEBRİKLER!</b>\n\n10 Kişiyi başarıyla davet ettiğiniz için <b>3 GÜNLÜK HEDİYE VIP</b> üyeliğiniz aktif edildi! 🚀",
-                            parse_mode="HTML"
-                        )
-                    except Exception: pass
-
-                save_data(db)
-
+            await query.answer("✅ Üyelikler onaylandı!")
             text, keyboard = build_main_menu(user_id)
             await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
         else:
-            await query.answer("⚠️ Hâlâ eksik kanallar var! Lütfen tümüne katılın.", show_alert=True)
+            await query.answer("⚠️ Hâlâ eksik kanallar var! Lütfen hepsine katılın.", show_alert=True)
         return
 
-    # Kullanıcı Menü İşlemleri
     if data == "user_profile":
         await query.answer()
         text, keyboard = build_profile_card(query.from_user)
@@ -379,8 +345,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ref_text = (
             "🔗 <b>KİŞİSEL DAVET (REFERANS) SİSTEMİ</b>\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "Arkadaşlarınızı bota davet ederek hediyeler kazanabilirsiniz!\n\n"
-            "🎁 <b>Ödül:</b> 10 Arkadaşını bota davet et, <b>3 GÜN ÜCRETSİZ VIP</b> kazan!\n\n"
+            "🎁 <b>Ödül:</b> 10 Arkadaşını davet et, <b>3 GÜN ÜCRETSİZ VIP</b> kazan!\n\n"
             f"📊 <b>Toplam Davet Sayınız:</b> <code>{inv_count} / 10</code>\n\n"
             f"👉 <b>Özel Davet Linkiniz:</b>\n<code>{ref_link}</code>"
         )
@@ -388,26 +353,47 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text=ref_text, parse_mode="HTML", reply_markup=keyboard)
         return
 
+    elif data == "vip_prices":
+        await query.answer()
+        vip_text = (
+            "⚡ <b>AĞUSTOS AYINA ÖZEL VIP KAMPANYASI!</b> ⚡\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "👑 <b>1 Aylık Premium:</b> <s>2.500 ₺</s> ➡️ <b>1.250 ₺</b>\n"
+            "🔥 <b>3 Aylık VIP Plus:</b> <s>5.000 ₺</s> ➡️ <b>2.500 ₺</b>\n"
+            "💎 <b>6 Aylık VIP Pro:</b> <b>4.500 ₺</b>\n"
+            "🎖️ <b>12 Aylık VIP:</b> <b>7.500 ₺</b>\n"
+            "♾️ <b>Sınırsız VIP:</b> <b>12.500 ₺</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            f"📲 <b>Satın Alım İletişim:</b> {VIP_CONTACT}"
+        )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💬 Yetkili İle İletişime Geç", url=f"https://t.me/{VIP_CONTACT.replace('@','')}")],
+            [InlineKeyboardButton("⬅️ Ana Menü", callback_data="menu_home")]
+        ])
+        await query.edit_message_text(text=vip_text, parse_mode="HTML", reply_markup=keyboard)
+        return
+
     elif data == "menu_home":
+        await query.answer()
         context.user_data['waiting_for_query'] = False
         text, keyboard = build_main_menu(user_id)
         await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
         return
 
-    # Admin İşlemleri
+    # Admin Butonları
     if user_id == ADMIN_ID:
         if data == "btn_add_vip":
             await query.answer()
             context.user_data['admin_action'] = 'add_vip'
-            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ İptal / Geri Dön", callback_data="admin_back")]])
-            await query.edit_message_text("👑 <b>VIP Verme Modu</b>\n\nLütfen VIP vermek istediğiniz kullanıcının <b>ID'sini ve gün sayısını</b> aralarında boşluk bırakarak yazın:\n<i>(Örn: 6073294253 30)</i>", parse_mode="HTML", reply_markup=keyboard)
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ İptal", callback_data="admin_back")]])
+            await query.edit_message_text("👑 VIP vereceğiniz kullanıcının <b>ID ve Gün</b> sayısını yazın:\n<i>(Örn: 6073294253 30)</i>", parse_mode="HTML", reply_markup=kb)
             return
 
         elif data == "btn_del_vip":
             await query.answer()
             context.user_data['admin_action'] = 'del_vip'
-            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ İptal / Geri Dön", callback_data="admin_back")]])
-            await query.edit_message_text("❌ <b>VIP Kaldırma Modu</b>\n\nVIP üyeliğini iptal etmek istediğiniz kullanıcının Telegram ID'sini yazıp gönderin:", parse_mode="HTML", reply_markup=keyboard)
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ İptal", callback_data="admin_back")]])
+            await query.edit_message_text("❌ VIP kaldırılacak kullanıcının ID'sini yazın:", parse_mode="HTML", reply_markup=kb)
             return
 
         elif data == "toggle_maintenance":
@@ -422,7 +408,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db["must_join"] = not db["must_join"]
             save_data(db)
             text, keyboard = build_admin_panel()
-            await query.answer("Kanal zorunluluğu değiştirildi!")
+            await query.answer("Kanal şartı değiştirildi!")
             await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
             return
 
@@ -433,83 +419,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
             return
 
-        elif data == "admin_users":
-            await query.answer()
-            u_list = list(db["users"].keys())
-            total = len(u_list)
-            msg = f"👥 <b>Toplam Kullanıcı Listesi ({total}):</b>\n━━━━━━━━━━━━━━━━━━\n"
-            
-            for uid in u_list[:80]:
-                u_data = db["users"][uid]
-                uname = u_data.get("username")
-                uname_str = f"| @{uname}" if uname else ""
-                is_v = " 👑 VIP" if u_data.get("is_vip") else ""
-                msg += f"• <code>{uid}</code> {uname_str}{is_v}\n"
-                
-            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Panele Geri Dön", callback_data="admin_back")]])
-            await query.edit_message_text(text=msg, parse_mode="HTML", reply_markup=keyboard)
-            return
-
-        elif data == "btn_ban":
-            await query.answer()
-            context.user_data['admin_action'] = 'ban_user'
-            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ İptal / Geri Dön", callback_data="admin_back")]])
-            await query.edit_message_text("⛔ <b>Kullanıcı Banlama/Ban Kaldırma Modu</b>\n\nBanlamak veya banını kaldırmak istediğiniz ID'yi gönderin:", parse_mode="HTML", reply_markup=keyboard)
-            return
-
-        elif data == "btn_add_channel":
-            await query.answer()
-            context.user_data['admin_action'] = 'add_channel'
-            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ İptal / Geri Dön", callback_data="admin_back")]])
-            await query.edit_message_text("➕ Kanal kullanıcı adını yazın (Örn: @arastirzorunlu):", parse_mode="HTML", reply_markup=keyboard)
-            return
-
-        elif data == "btn_del_channel":
-            await query.answer()
-            context.user_data['admin_action'] = 'del_channel'
-            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ İptal / Geri Dön", callback_data="admin_back")]])
-            await query.edit_message_text("➖ Silinecek kanal adını yazın:", parse_mode="HTML", reply_markup=keyboard)
-            return
-
-        elif data == "btn_broadcast":
-            await query.answer()
-            context.user_data['admin_action'] = 'broadcast_msg'
-            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ İptal / Geri Dön", callback_data="admin_back")]])
-            await query.edit_message_text("📢 Duyuru metnini yazıp gönderin:", parse_mode="HTML", reply_markup=keyboard)
-            return
-
-    is_ok, missing = await check_channel_subscription(user_id, context)
-    if not is_ok:
-        await query.answer("⚠️ Zorunlu kanallara katılmalısınız!", show_alert=True)
-        await send_subscription_warning(query.message.chat_id, user_id, missing, context)
-        return
-
-    await query.answer()
+    # Sorgu Seçimleri
     if data.startswith("query_"):
         q_type = data.split("_")[1]
         
-        # SORGULAMA LIMITI KONTROLU
         u_data = db["users"].get(str(user_id), {})
         is_vip = u_data.get("is_vip", False) or (user_id == ADMIN_ID)
         daily_count = u_data.get("daily_queries", 0)
 
         if not is_vip and daily_count >= 7:
-            vip_kb = InlineKeyboardMarkup([[InlineKeyboardButton("👑 VIP Satın Al", url=f"https://t.me/{VIP_CONTACT.replace('@','')}")]])
-            await query.edit_message_text(
-                f"⚠️ <b>GÜNLÜK SORGU LİMİTİNİZ DOLDU!</b>\n\n"
-                f"Normal üyeler günde en fazla <b>7 sorgu</b> yapabilir.\n"
-                f"Sınırsız sorgu yapmak ve VIP ayrıcalıklarından yararlanmak için {VIP_CONTACT} hesabı ile iletişime geçebilirsiniz.",
-                parse_mode="HTML",
-                reply_markup=vip_kb
-            )
+            await query.answer("⚠️ Günlük 7 sorgu limitiniz doldu! VIP paketlerini inceleyin.", show_alert=True)
             return
 
         context.user_data['waiting_for_query'] = True
         context.user_data['current_query_type'] = q_type
+        context.user_data['menu_message_id'] = query.message.message_id
         
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ İşlemi İptal Et / Ana Menü", callback_data="menu_home")]])
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ İptal Et / Ana Menü", callback_data="menu_home")]])
         await query.edit_message_text(
-            f"🔍 <b>{q_type.upper()} Sorgulama Ekranı</b>\n\nLütfen aratmak istediğiniz bilgiyi mesaja yazıp gönderin:",
+            f"🔍 <b>{q_type.upper()} Sorgulama Ekranı</b>\n\n"
+            f"Lütfen aratmak istediğiniz bilgiyi mesaja yazıp gönderin:\n"
+            f"<i>(Mesajınız otomatik olarak temizlenecektir.)</i>",
             parse_mode="HTML",
             reply_markup=keyboard
         )
@@ -534,7 +464,7 @@ def format_data_text(data, indent=0):
                 text += f"{prefix}• <code>{item_safe}</code>\n"
     return text
 
-def generate_html_file(q_type, data, count):
+def generate_html_file(q_type, data):
     rendered_body = format_data_text(data)
     return f"""<!DOCTYPE html>
 <html lang="tr">
@@ -557,8 +487,11 @@ def generate_html_file(q_type, data, count):
 </body>
 </html>"""
 
-# --- 6. MESAJ İŞLEME ---
+# --- MESAJ İŞLEME VE TEMİZLEME ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # KULLANICININ ATTIĞI MESAJI ANINDA SİL (Sohbet temiz kalır)
+    asyncio.create_task(delete_message_safe(update.message))
+
     await register_user(update.effective_user, context=context)
     user_id = update.effective_user.id
     text_input = update.message.text.strip()
@@ -566,9 +499,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u_str = f"@{u_name}" if u_name else "<i>Kullanıcı Adı Yok</i>"
 
     if db.get("maintenance_mode") and user_id != ADMIN_ID:
-        await update.message.reply_text("⚙️ <b>SİSTEM BAKIMDA!</b>\n\nBot şu an bakım çalışması nedeniyle hizmet dışıdır.", parse_mode="HTML")
         return
 
+    # ADMIN İŞLEMLERİ
     if user_id == ADMIN_ID and context.user_data.get('admin_action'):
         action = context.user_data.get('admin_action')
         context.user_data['admin_action'] = None
@@ -576,117 +509,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if action == 'add_vip':
             try:
                 parts = text_input.split(" ")
-                target_uid = parts[0]
-                days = int(parts[1]) if len(parts) > 1 else 30
-
+                target_uid, days = parts[0], int(parts[1]) if len(parts) > 1 else 30
                 if target_uid in db["users"]:
                     db["users"][target_uid]["is_vip"] = True
-                    until_date = (date.today() + timedelta(days=days)).isoformat()
-                    db["users"][target_uid]["vip_until"] = until_date
+                    db["users"][target_uid]["vip_until"] = (date.today() + timedelta(days=days)).isoformat()
                     save_data(db)
-                    await update.message.reply_text(f"👑 <code>{target_uid}</code> ID'li kullanıcıya <b>{days} günlük</b> VIP verildi.", parse_mode="HTML")
-                    await send_log(context, f"👑 <b>VIP VERİLDİ!</b>\n<b>Kullanıcı ID:</b> <code>{target_uid}</code>\n<b>Süre:</b> {days} Gün")
-                else:
-                    await update.message.reply_text("⚠️ Kullanıcı sistemde bulunamadı.")
-            except Exception:
-                await update.message.reply_text("⚠️ Hatalı format! Örnek: <code>6073294253 30</code>", parse_mode="HTML")
-            return
-
-        elif action == 'del_vip':
-            if text_input in db["users"]:
-                db["users"][text_input]["is_vip"] = False
-                db["users"][text_input]["vip_until"] = None
-                save_data(db)
-                await update.message.reply_text(f"❌ <code>{text_input}</code> ID'li kullanıcının VIP üyeliği kaldırıldı.", parse_mode="HTML")
-            return
-
-        elif action == 'ban_user':
-            if text_input in db["users"]:
-                curr = db["users"][text_input].get("is_banned", False)
-                db["users"][text_input]["is_banned"] = not curr
-                save_data(db)
-                st = "Banlandı" if not curr else "Banı Kaldırıldı"
-                await update.message.reply_text(f"⛔ Kullanıcı <b>{st}</b>: <code>{text_input}</code>", parse_mode="HTML")
-            return
-
-        elif action == 'add_channel':
-            ch_name = text_input if text_input.startswith("@") else "@" + text_input
-            if ch_name not in db["channels"]:
-                db["channels"].append(ch_name)
-                save_data(db)
-                await update.message.reply_text(f"✅ <b>{ch_name}</b> eklendi.", parse_mode="HTML")
-            return
-
-        elif action == 'del_channel':
-            ch_name = text_input if text_input.startswith("@") else "@" + text_input
-            if ch_name in db["channels"]:
-                db["channels"].remove(ch_name)
-                save_data(db)
-                await update.message.reply_text(f"🗑️ <b>{ch_name}</b> silindi.", parse_mode="HTML")
-            return
-
-        elif action == 'broadcast_msg':
-            global duyuru_iptal_flag
-            duyuru_iptal_flag = False
-            status_msg = await update.message.reply_text("📢 <b>Duyuru Gönderimi Başlatıldı...</b>", parse_mode="HTML")
-            success, failed = 0, 0
-            user_ids = list(db["users"].keys())
+                    await send_log(context, f"👑 <b>VIP VERİLDİ!</b>\nID: <code>{target_uid}</code> ({days} Gün)")
+            except Exception: pass
             
-            for idx, uid in enumerate(user_ids, 1):
-                if duyuru_iptal_flag:
-                    await status_msg.edit_text("🛑 Duyuru İptal Edildi!", parse_mode="HTML")
-                    return
-                try:
-                    await context.bot.send_message(chat_id=int(uid), text=f"📢 <b>DUYURU</b>\n━━━━━━━━━━━━━━━━━━\n{text_input}", parse_mode="HTML")
-                    success += 1
-                except Exception: failed += 1
-                await asyncio.sleep(0.05)
-
-            await status_msg.edit_text(f"✅ <b>Duyuru Tamamlandı!</b>\n\n✅ Gönderilen: {success}\n❌ Başarısız: {failed}", parse_mode="HTML")
+            text, keyboard = build_admin_panel()
+            menu_msg_id = context.user_data.get('menu_message_id')
+            if menu_msg_id:
+                try: await context.bot.edit_message_text(chat_id=user_id, message_id=menu_msg_id, text=text, parse_mode="HTML", reply_markup=keyboard)
+                except Exception: pass
             return
 
-    is_ok, missing = await check_channel_subscription(user_id, context)
-    if not is_ok:
-        await send_subscription_warning(update.effective_chat.id, user_id, missing, context)
-        return
-
+    # SORGU İŞLEMLERİ
     if context.user_data.get('waiting_for_query'):
         q_type = context.user_data.get('current_query_type', 'islem')
-        
-        # SORGULAMA LIMIT KONTROLU
+        menu_msg_id = context.user_data.get('menu_message_id')
+        context.user_data['waiting_for_query'] = False
+
         u_data = db["users"].get(str(user_id), {})
         is_vip = u_data.get("is_vip", False) or (user_id == ADMIN_ID)
         daily_count = u_data.get("daily_queries", 0)
 
-        if not is_vip and daily_count >= 7:
-            vip_kb = InlineKeyboardMarkup([[InlineKeyboardButton("👑 VIP Satın Al", url=f"https://t.me/{VIP_CONTACT.replace('@','')}")]])
-            await update.message.reply_text(
-                f"⚠️ <b>GÜNLÜK SORGU LİMİTİNİZ DOLDU!</b>\n\n"
-                f"Normal üyeler günde en fazla <b>7 sorgu</b> yapabilir.\n"
-                f"Sınırsız sorgu yapmak ve VIP almak için {VIP_CONTACT} hesabı ile iletişime geçebilirsiniz.",
-                parse_mode="HTML",
-                reply_markup=vip_kb
-            )
-            context.user_data['waiting_for_query'] = False
-            return
+        # Lütfen bekleyin yazısını mevcut menü mesajına yazıyoruz
+        if menu_msg_id:
+            try:
+                await context.bot.edit_message_text(chat_id=user_id, message_id=menu_msg_id, text="⏳ <b>Sorgulanıyor, lütfen bekleyin...</b>", parse_mode="HTML")
+            except Exception: pass
 
-        context.user_data['waiting_for_query'] = False
-        wait_msg = await update.message.reply_text("⏳ Sorgulanıyor, lütfen bekleyin...", parse_mode="HTML")
-
-        # Sayaç Artırma
         db["users"][str(user_id)]["daily_queries"] = daily_count + 1
         save_data(db)
-        
-        # Log Kanalına Gönder
-        query_log = (
-            "🔍 <b>YENİ SORGU YAPILDI</b>\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            f"<b>Kullanıcı:</b> {u_str}\n"
-            f"<b>ID:</b> <code>{user_id}</code>\n"
-            f"<b>Sorgu Türü:</b> <code>{q_type.upper()}</code>\n"
-            f"<b>Aratılan:</b> <code>{html.escape(text_input)}</code>"
-        )
-        await send_log(context, query_log)
+
+        # LOG
+        await send_log(context, f"🔍 <b>SORGU:</b> {u_str} | <code>{q_type.upper()}</code> | <code>{html.escape(text_input)}</code>")
 
         try:
             base_api = "http://arastir.vip/api"
@@ -716,30 +574,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if count is not None: sonuc_mesaji += f"📊 <b>Bulunan Kayıt:</b> <code>{count}</code>\n"
                     sonuc_mesaji += "━━━━━━━━━━━━━━━━━━\n" + raw_formatted + "━━━━━━━━━━━━━━━━━━"
                     
+                    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data="menu_home")]])
+
                     if len(sonuc_mesaji) > 3500:
-                        full_html = generate_html_file(q_type, data, count)
+                        full_html = generate_html_file(q_type, data)
                         html_bytes = io.BytesIO(full_html.encode('utf-8'))
                         html_bytes.name = f"ArastirX_{q_type}_{text_input}.html"
                         
-                        await wait_msg.delete()
-                        await update.message.reply_document(
+                        if menu_msg_id:
+                            try: await context.bot.delete_message(chat_id=user_id, message_id=menu_msg_id)
+                            except Exception: pass
+
+                        await context.bot.send_document(
+                            chat_id=user_id,
                             document=html_bytes,
-                            caption=f"✅ <b>Sorgu Başarılı ({q_type.upper()})</b>\n📄 <i>Sonucunuz <b>HTML Dosyası</b> formatındadır.</i>",
-                            parse_mode="HTML"
+                            caption=f"✅ <b>Sorgu Başarılı ({q_type.upper()})</b>\n📄 <i>Sonuç HTML dosyası olarak hazırlandı.</i>",
+                            parse_mode="HTML",
+                            reply_markup=keyboard
                         )
                     else:
-                        await wait_msg.edit_text(sonuc_mesaji, parse_mode="HTML")
+                        if menu_msg_id:
+                            await context.bot.edit_message_text(chat_id=user_id, message_id=menu_msg_id, text=sonuc_mesaji, parse_mode="HTML", reply_markup=keyboard)
                 else:
-                    err_msg = html.escape(str(res_json.get("error", "Bilinmeyen bir hata oluştu.")))
-                    await wait_msg.edit_text(f"⚠️ <b>Hata:</b> {err_msg}", parse_mode="HTML")
+                    err = html.escape(str(res_json.get("error", "Kayıt bulunamadı.")))
+                    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ana Menü", callback_data="menu_home")]])
+                    if menu_msg_id:
+                        await context.bot.edit_message_text(chat_id=user_id, message_id=menu_msg_id, text=f"⚠️ <b>Hata:</b> {err}", parse_mode="HTML", reply_markup=keyboard)
             else:
-                await wait_msg.edit_text(f"❌ API Sunucu Hatası: {response.status_code}")
-                
+                keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ana Menü", callback_data="menu_home")]])
+                if menu_msg_id:
+                    await context.bot.edit_message_text(chat_id=user_id, message_id=menu_msg_id, text=f"❌ API Sunucu Hatası: {response.status_code}", parse_mode="HTML", reply_markup=keyboard)
+
         except Exception as e:
-            err_str = html.escape(str(e))
-            await wait_msg.edit_text(f"❌ Sistem hatası oluştu: {err_str}", parse_mode="HTML")
-    else:
-        await update.message.reply_text("Menüyü açmak için /start yazabilirsiniz.")
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ana Menü", callback_data="menu_home")]])
+            if menu_msg_id:
+                await context.bot.edit_message_text(chat_id=user_id, message_id=menu_msg_id, text=f"❌ Sistem Hatası: {html.escape(str(e))}", parse_mode="HTML", reply_markup=keyboard)
 
 if __name__ == '__main__':
     keep_alive()
