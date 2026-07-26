@@ -1,5 +1,6 @@
 from flask import Flask
 import threading
+import requests
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
@@ -132,7 +133,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "broadcast":
         await query.message.reply_text("📢 Duyuru göndermek için metni yazın.")
 
-# 5. Kullanıcının Girdiği Veriyi Anında İşleme ve Sonuç Döndürme
+# 5. Kullanıcının Girdiği Veriyi Alıp API'ye Gönderme ve Sonucu Basma
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('waiting_for_query'):
         query_text = update.message.text
@@ -140,18 +141,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         context.user_data['waiting_for_query'] = False
         
-        # 📌 Bekletme yapmadan doğrudan sonucu burada gösteriyoruz
-        # Kendi API sorgunu veya veri çekme kodunu bu bloğun içine yazabilirsin
-        sonuc_metni = (
-            f"✅ **Sorgu Başarılı**\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"📌 **Tür:** `{q_type.upper()}`\n"
-            f"🔎 **Aranan:** `{query_text}`\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"📄 **Sonuç:** (Bulunan veriler buraya gelecektir)"
-        )
+        await update.message.reply_text("⏳ Sorgulanıyor, lütfen bekleyin...", parse_mode="Markdown")
         
-        await update.message.reply_text(sonuc_metni, parse_mode="Markdown")
+        try:
+            # 📌 API Bağlantı Noktası (Kendi API adresini ve parametrelerini buraya bağlayabilirsin)
+            # Örnek istek yapısı:
+            # api_url = f"https://api.ornekadres.com/sorgu?turt={q_type}&q={query_text}"
+            # response = requests.get(api_url, timeout=10)
+            # data = response.json()
+            
+            # Şimdilik API bağlantısını aktif çalışacak şablona oturtuyoruz:
+            sonuc_mesaji = (
+                f"✅ **Sorgu Sonucu ({q_type.upper()})**\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🔎 **Aranan:** `{query_text}`\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"📋 **Veri:** API'den gelen sonuç burada görüntülenecektir."
+            )
+            
+            await update.message.reply_text(sonuc_mesaji, parse_mode="Markdown")
+            
+        except Exception as e:
+            await update.message.reply_text(f"❌ Sorgu sırasında bir hata oluştu: {str(e)}")
+            
     else:
         await update.message.reply_text("Menüyü açmak için /start yazabilirsin.")
 
