@@ -71,7 +71,6 @@ def verileri_yukle():
         if data.get("son_bugun_tarih") != today:
             data["bugun_gelen"] = 0
             data["son_bugun_tarih"] = today
-            # Günlük sorgu haklarını sıfırla
             for u in data.get("users", {}).values():
                 u["gunluk_sorgu"] = 0
             verileri_kaydet(data)
@@ -87,10 +86,8 @@ def kullanici_kaydet_ve_guncelle(user, referrer_id=None):
     s_id = str(user.id)
     today = datetime.now().strftime("%Y-%m-%d")
     username = f"@{user.username}" if user.username else "Yok"
-    yeni_kayit = False
     
     if s_id not in db["users"]:
-        yeni_kayit = True
         db["users"][s_id] = {
             "name": user.first_name or "Kullanıcı",
             "username": username,
@@ -103,22 +100,18 @@ def kullanici_kaydet_ve_guncelle(user, referrer_id=None):
         }
         db["bugun_gelen"] = db.get("bugun_gelen", 0) + 1
 
-        # Referans/Davet Kontrolü
         if referrer_id and str(referrer_id) in db["users"] and str(referrer_id) != s_id:
             ref_user = db["users"][str(referrer_id)]
             ref_user["davet_sayisi"] = ref_user.get("davet_sayisi", 0) + 1
             
-            # 10 Davete 3 Gün VIP Ödülü
             if ref_user["davet_sayisi"] % 10 == 0:
                 ref_user["vip"] = True
                 suan = datetime.now()
                 if ref_user.get("vip_bitis"):
                     try:
                         mevcut_bitis = datetime.strptime(ref_user["vip_bitis"], "%Y-%m-%d %H:%M")
-                        if mevcut_bitis > suan:
-                            suan = mevcut_bitis
-                    except Exception:
-                        pass
+                        if mevcut_bitis > suan: suan = mevcut_bitis
+                    except Exception: pass
                 yeni_bitis = suan + timedelta(days=3)
                 ref_user["vip_bitis"] = yeni_bitis.strftime("%Y-%m-%d %H:%M")
     else:
@@ -127,7 +120,6 @@ def kullanici_kaydet_ve_guncelle(user, referrer_id=None):
         if "gunluk_sorgu" not in db["users"][s_id]: db["users"][s_id]["gunluk_sorgu"] = 0
         if "davet_sayisi" not in db["users"][s_id]: db["users"][s_id]["davet_sayisi"] = 0
 
-    # Süreli VIP Kontrolü
     u = db["users"][s_id]
     if u.get("vip") and u.get("vip_bitis"):
         try:
@@ -135,18 +127,36 @@ def kullanici_kaydet_ve_guncelle(user, referrer_id=None):
             if datetime.now() > bitis:
                 u["vip"] = False
                 u["vip_bitis"] = None
-        except Exception:
-            pass
+        except Exception: pass
 
     verileri_kaydet(db)
-    return db["users"][s_id], yeni_kayit
+    return db["users"][s_id]
+
+def find_user_id_by_input(db, input_str):
+    input_str = input_str.strip()
+    if input_str in db["users"]:
+        return input_str
+    if not input_str.startswith("@"):
+        uname = "@" + input_str
+    else:
+        uname = input_str
+    
+    for uid, uinfo in db["users"].items():
+        if uinfo.get("username", "").lower() == uname.lower():
+            return uid
+    return None
 
 
 # ==========================================
-# 4. UZUN MESAJ BÖLÜCÜ & API SÜRÜCÜSÜ
+# 4. YARDIMCI FONKSİYONLAR & API
 # ==========================================
+async def mesaj_sil_guvenli(context, chat_id, message_id):
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception:
+        pass
+
 async def guvenli_html_mesaj_gonder(update_or_msg, text: str):
-    """HTML içeriklerini Telegram'ın 4096 karakter sınırına takılmadan parçalayarak gönderir."""
     MAX_LEN = 3800
     if len(text) <= MAX_LEN:
         if hasattr(update_or_msg, 'reply_text'):
@@ -184,7 +194,6 @@ def format_api_response_html(sorgu_turu: str, res: dict) -> str:
     if not data:
         return "❌ <b>Kayıt bulunamadı.</b>"
 
-    # 1. TC SORGU
     if sorgu_turu == "sorgu_tc":
         return (
             f"🖨 <b>TC Kimlik Sorgu Sonucu</b>\n\n"
@@ -196,21 +205,16 @@ def format_api_response_html(sorgu_turu: str, res: dict) -> str:
             f"• <b>Baba Adı / TC:</b> {html.escape(str(data.get('BABAADI', '-')))} (<code>{html.escape(str(data.get('BABATC', '-')))}</code>)\n"
             f"• <b>Uyruk:</b> {html.escape(str(data.get('UYRUK', '-')))}"
         )
-
-    # 2. AD SOYAD SORGU
     elif sorgu_turu == "sorgu_adsoyad":
         count = res.get("count", len(data))
         out = f"👤 <b>Ad Soyad Sorgu Sonuçları</b> ({count} Kayıt):\n\n"
         for idx, item in enumerate(data, 1):
             out += f"<b>{idx}.</b> <code>{html.escape(str(item.get('TC')))}</code> | {html.escape(str(item.get('ADI')))} {html.escape(str(item.get('SOYADI')))} | DT: {html.escape(str(item.get('DOGUMTARIHI')))}\n"
         return out
-
-    # 3. AİLE SORGU
     elif sorgu_turu == "sorgu_aile":
         anne = data.get("anne", {})
         baba = data.get("baba", {})
         kardesler = data.get("kardesler", [])
-        
         out = f"👥 <b>Aile Sorgu Sonucu</b>\n\n"
         out += f"👩 <b>Anne:</b> {html.escape(str(anne.get('ADI', '-')))} {html.escape(str(anne.get('SOYADI', '')))} (<code>{html.escape(str(anne.get('TC', '-')))}</code>)\n"
         out += f"👨 <b>Baba:</b> {html.escape(str(baba.get('ADI', '-')))} {html.escape(str(baba.get('SOYADI', '')))} (<code>{html.escape(str(baba.get('TC', '-')))}</code>)\n\n"
@@ -218,8 +222,6 @@ def format_api_response_html(sorgu_turu: str, res: dict) -> str:
         for k in kardesler:
             out += f"• <code>{html.escape(str(k.get('TC')))}</code> - {html.escape(str(k.get('ADI')))} {html.escape(str(k.get('SOYADI')))}\n"
         return out
-
-    # 4. SÜLALE SORGU
     elif sorgu_turu == "sorgu_sulale":
         kendisi = data.get("kendisi", {})
         anne = data.get("anne", {})
@@ -228,7 +230,6 @@ def format_api_response_html(sorgu_turu: str, res: dict) -> str:
         dede_a = data.get("dede_anne_tarafi", {})
         babaanne = data.get("babaanne", {})
         dede_b = data.get("dede_baba_tarafi", {})
-        
         return (
             f"👥 <b>Sülale Sorgu Sonucu</b>\n\n"
             f"👤 <b>Kendisi:</b> {html.escape(str(kendisi.get('ADI', '-')))} (<code>{html.escape(str(kendisi.get('TC', '-')))}</code>)\n"
@@ -239,16 +240,12 @@ def format_api_response_html(sorgu_turu: str, res: dict) -> str:
             f"👵 <b>Babaanne:</b> {html.escape(str(babaanne.get('ADI', '-')))} (<code>{html.escape(str(babaanne.get('TC', '-')))}</code>)\n"
             f"👴 <b>Dede (Baba T.):</b> {html.escape(str(dede_b.get('ADI', '-')))} (<code>{html.escape(str(dede_b.get('TC', '-')))}</code>)"
         )
-
-    # 5. ÇOCUK SORGU
     elif sorgu_turu == "sorgu_cocuk":
         count = res.get("count", len(data))
         out = f"👶 <b>Çocuk Sorgu Sonuçları</b> ({count} Kayıt):\n\n"
         for item in data:
             out += f"• <code>{html.escape(str(item.get('TC')))}</code> | {html.escape(str(item.get('ADI')))} {html.escape(str(item.get('SOYADI')))} | DT: {html.escape(str(item.get('DOGUMTARIHI')))}\n"
         return out
-
-    # 6. ADRES SORGU
     elif sorgu_turu == "sorgu_adres":
         return (
             f"📍 <b>Adres & İkametgah Bilgisi</b>\n\n"
@@ -258,18 +255,12 @@ def format_api_response_html(sorgu_turu: str, res: dict) -> str:
             f"• <b>Vergi No:</b> {html.escape(str(data.get('VergiNumarasi', '-')))}\n"
             f"• <b>İkametgah:</b> {html.escape(str(data.get('Ikametgah', '-')))}"
         )
-
-    # 7. GSM -> TC
     elif sorgu_turu == "sorgu_gsmtc":
         tcleri = "\n".join([f"• <code>{html.escape(str(tc))}</code>" for tc in data])
         return f"📱 <b>GSM → TC Sorgu Sonucu</b>\n\n{tcleri}"
-
-    # 8. TC -> GSM
     elif sorgu_turu == "sorgu_tcgsm":
         gsmleri = "\n".join([f"• <code>{html.escape(str(gsm))}</code>" for gsm in data])
         return f"📱 <b>TC → GSM Sorgu Sonucu</b>\n\n{gsmleri}"
-
-    # 9. İŞYERİ SORGU
     elif sorgu_turu == "sorgu_isyeri":
         out = f"🏢 <b>İşyeri & SGK Bilgileri</b> ({res.get('count', len(data))} Kayıt):\n\n"
         for item in data:
@@ -283,7 +274,6 @@ def format_api_response_html(sorgu_turu: str, res: dict) -> str:
                 f"────────────────────────\n"
             )
         return out
-
     return "⚠️ Bilinmeyen sorgu formatı."
 
 
@@ -301,8 +291,7 @@ async def kanallara_katildi_mi(bot, user_id):
             member = await bot.get_chat_member(chat_id=kanal, user_id=user_id)
             if member.status not in ["creator", "administrator", "member"]:
                 eksik_kanallar.append(kanal)
-        except Exception:
-            continue
+        except Exception: continue
             
     return len(eksik_kanallar) == 0, eksik_kanallar
 
@@ -315,13 +304,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = verileri_yukle()
     s_id = str(user.id)
     
-    # Referans (Davet) Parametresi Yakalama
-    ref_id = None
-    if context.args and len(context.args) > 0:
-        ref_id = context.args[0]
+    ref_id = context.args[0] if context.args and len(context.args) > 0 else None
 
     if s_id in db.get("banned_users", []):
-        msg = "❌ <b>Bot kullanımınız engellenmiştir (Banlandınız).</b>"
+        msg = "❌ <b>Bot kullanımınız engellenmiştir.</b>"
         if update.message: await update.message.reply_text(msg, parse_mode="HTML")
         return
 
@@ -330,7 +316,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message: await update.message.reply_text(msg, parse_mode="HTML")
         return
 
-    u_info, _ = kullanici_kaydet_ve_guncelle(user, ref_id)
+    u_info = kullanici_kaydet_ve_guncelle(user, ref_id)
 
     katildi, eksikler = await kanallara_katildi_mi(context.bot, user.id)
     if not katildi:
@@ -347,7 +333,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.callback_query.message.edit_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         return
 
-    # Hak Hesabı
     if u_info.get("vip") or user.id == ADMIN_ID:
         hak_text = "Sınırsız ∞ (VIP)"
     else:
@@ -387,6 +372,11 @@ async def panel_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Bu komutu sadece bot sahibi kullanabilir.")
         return
+    
+    # Otomatik Mesaj Silme (/panel komutunu temizle)
+    if update.message:
+        await mesaj_sil_guvenli(context, update.effective_chat.id, update.message.message_id)
+
     await admin_panel_goster(update, context)
 
 async def admin_panel_goster(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -450,11 +440,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ADMIN BUTONLARI
     if user_id == ADMIN_ID:
-        if data == "adm_panel_refresh":
+        if data in ["adm_panel_refresh", "adm_iptal"]:
+            context.user_data.pop("beklenen_islem", None)
+            context.user_data.pop("prompt_msg_id", None)
             await admin_panel_goster(update, context)
             return
 
-        elif data == "adm_toggle_bakim":
+        cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ İptal / Panele Dön", callback_data="adm_iptal")]])
+
+        if data == "adm_toggle_bakim":
             db["bakim_modu"] = not db.get("bakim_modu", False)
             verileri_kaydet(db)
             await admin_panel_goster(update, context)
@@ -468,32 +462,52 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif data == "adm_vip_ver":
             context.user_data["beklenen_islem"] = "vip_ver"
-            await query.message.edit_text("👑 <b>VIP Verilecek Kullanıcının Telegram ID'sini Yazın:</b>", parse_mode="HTML")
+            msg = (
+                "👑 <b>VIP Verilecek Kullanıcı Bilgisi & Süresini Yazın:</b>\n\n"
+                "<b>Format:</b> <code>ID SÜRE</code> veya <code>@KULLANICI_ADI SÜRE</code>\n\n"
+                "📌 <b>Örnekler:</b>\n"
+                "• <code>6073294253 30</code> (30 Gün VIP)\n"
+                "• <code>@apocan 7</code> (7 Gün VIP)\n"
+                "• <code>6073294253</code> (Süre yazmazsanız varsayılan 30 Gün)\n"
+                "• <code>6073294253 0</code> (Sınırsız VIP)"
+            )
+            prompt = await query.message.edit_text(msg, reply_markup=cancel_kb, parse_mode="HTML")
+            context.user_data["prompt_msg_id"] = prompt.message_id
             return
 
         elif data == "adm_vip_kaldir":
             context.user_data["beklenen_islem"] = "vip_kaldir"
-            await query.message.edit_text("❌ <b>VIP'si Kaldırılacak Kullanıcının Telegram ID'sini Yazın:</b>", parse_mode="HTML")
+            msg = "❌ <b>VIP'si Kaldırılacak Kullanıcının Telegram ID veya @Kullanıcı Adını Yazın:</b>"
+            prompt = await query.message.edit_text(msg, reply_markup=cancel_kb, parse_mode="HTML")
+            context.user_data["prompt_msg_id"] = prompt.message_id
             return
 
         elif data == "adm_kanal_ekle":
             context.user_data["beklenen_islem"] = "kanal_ekle"
-            await query.message.edit_text("➕ <b>Eklenecek Kanal Kullanıcı Adını Yazın (Örn: <code>@arastirduyuru</code>):</b>", parse_mode="HTML")
+            msg = "➕ <b>Eklenecek Kanal Kullanıcı Adını Yazın (Örn: <code>@arastirduyuru</code>):</b>"
+            prompt = await query.message.edit_text(msg, reply_markup=cancel_kb, parse_mode="HTML")
+            context.user_data["prompt_msg_id"] = prompt.message_id
             return
 
         elif data == "adm_kanal_sil":
             context.user_data["beklenen_islem"] = "kanal_sil"
-            await query.message.edit_text("➖ <b>Silinecek Kanal Kullanıcı Adını Yazın (Örn: <code>@arastirduyuru</code>):</b>", parse_mode="HTML")
+            msg = "➖ <b>Silinecek Kanal Kullanıcı Adını Yazın (Örn: <code>@arastirduyuru</code>):</b>"
+            prompt = await query.message.edit_text(msg, reply_markup=cancel_kb, parse_mode="HTML")
+            context.user_data["prompt_msg_id"] = prompt.message_id
             return
 
         elif data == "adm_ban_yonet":
             context.user_data["beklenen_islem"] = "ban_yonet"
-            await query.message.edit_text("⛔️ <b>Banlayacağınız veya Banını Kaldıracağınız Kullanıcı ID'sini Yazın:</b>", parse_mode="HTML")
+            msg = "⛔️ <b>Banlayacağınız veya Banını Kaldıracağınız ID veya @Kullanıcı Adını Yazın:</b>"
+            prompt = await query.message.edit_text(msg, reply_markup=cancel_kb, parse_mode="HTML")
+            context.user_data["prompt_msg_id"] = prompt.message_id
             return
 
         elif data == "adm_duyuru_gonder":
             context.user_data["beklenen_islem"] = "duyuru_gonder"
-            await query.message.edit_text("📢 <b>Tüm Kullanıcılara Gönderilecek Duyuru Metnini Yazın:</b>", parse_mode="HTML")
+            msg = "📢 <b>Tüm Kullanıcılara Gönderilecek Duyuru Metnini Yazın:</b>"
+            prompt = await query.message.edit_text(msg, reply_markup=cancel_kb, parse_mode="HTML")
+            context.user_data["prompt_msg_id"] = prompt.message_id
             return
 
         elif data == "adm_user_list":
@@ -520,7 +534,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if kullanilan >= GUNLUK_UCRETSIZ_LIMIT:
                 msg = (
                     f"⚠️ <b>Günlük Ücretsiz Sorgu Sınırına Ulaştınız!</b>\n\n"
-                    f"Günlük ücretsiz sorgu limitiniz (<b>{GUNLUK_UCRETSIZ_LIMIT}</b>) dolmıştır.\n"
+                    f"Günlük ücretsiz sorgu limitiniz (<b>{GUNLUK_UCRETSIZ_LIMIT}</b>) dolmuştur.\n"
                     f"Sınırsız ve kesintisiz sorgu yapmak için VIP üyelik satın alabilir veya arkadaşlarınızı davet ederek VIP kazanabilirsiniz."
                 )
                 kb = InlineKeyboardMarkup([[InlineKeyboardButton("👑 VIP Satın Al / Fiyatlar", callback_data="vip_fiyatlar")]])
@@ -542,7 +556,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         
         msg = rehber.get(data, "Lütfen sorgulamak istediğiniz veriyi yazın:")
-        await query.message.reply_text(f"🔍 {msg}", parse_mode="HTML")
+        prompt = await query.message.reply_text(f"🔍 {msg}", parse_mode="HTML")
+        context.user_data["sorgu_prompt_id"] = prompt.message_id
 
     elif data == "profil_im":
         u_info = db.get("users", {}).get(str(user_id), {})
@@ -598,29 +613,58 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==========================================
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    user_msg_id = update.message.message_id
     text = update.message.text.strip()
     db = verileri_yukle()
 
     # 1. ADMIN BEKLEYEN İŞLEMLERİ
     if user_id == ADMIN_ID and "beklenen_islem" in context.user_data:
         islem = context.user_data.pop("beklenen_islem")
+        prompt_msg_id = context.user_data.pop("prompt_msg_id", None)
+
+        # Mesaj Temizliği
+        await mesaj_sil_guvenli(context, chat_id, user_msg_id)
+        if prompt_msg_id: await mesaj_sil_guvenli(context, chat_id, prompt_msg_id)
 
         if islem == "vip_ver":
-            if text in db["users"]:
-                db["users"][text]["vip"] = True
+            parcalar = text.split()
+            input_user = parcalar[0]
+            gun_sayisi = 30 # Varsayılan 30 gün
+            
+            if len(parcalar) > 1:
+                try:
+                    gun_sayisi = int(parcalar[1])
+                except ValueError:
+                    if parcalar[1].lower() in ["sinirsiz", "sonsuz", "0"]:
+                        gun_sayisi = 0
+
+            target_uid = find_user_id_by_input(db, input_user)
+            if target_uid:
+                db["users"][target_uid]["vip"] = True
+                if gun_sayisi > 0:
+                    yeni_bitis = datetime.now() + timedelta(days=gun_sayisi)
+                    db["users"][target_uid]["vip_bitis"] = yeni_bitis.strftime("%Y-%m-%d %H:%M")
+                    sure_str = f"<b>{gun_sayisi} Gün</b>"
+                else:
+                    db["users"][target_uid]["vip_bitis"] = None
+                    sure_str = "<b>Sınırsız / Ömür Boyu</b>"
+
                 verileri_kaydet(db)
-                await update.message.reply_text(f"✅ <code>{text}</code> ID'li kullanıcı <b>VIP</b> yapıldı!", parse_mode="HTML")
+                u_name = db["users"][target_uid].get("name", "Kullanıcı")
+                await update.message.reply_text(f"✅ <b>{html.escape(u_name)}</b> (<code>{target_uid}</code>) kullanıcısına {sure_str} VIP tanımlandı!", parse_mode="HTML")
             else:
-                await update.message.reply_text("❌ Bu kullanıcı veritabanında bulunamadı.")
+                await update.message.reply_text("❌ Kullanıcı bulunamadı! Lütfen kullanıcının bota en az bir kez mesaj attığından emin olun.")
 
         elif islem == "vip_kaldir":
-            if text in db["users"]:
-                db["users"][text]["vip"] = False
-                db["users"][text]["vip_bitis"] = None
+            target_uid = find_user_id_by_input(db, text)
+            if target_uid:
+                db["users"][target_uid]["vip"] = False
+                db["users"][target_uid]["vip_bitis"] = None
                 verileri_kaydet(db)
-                await update.message.reply_text(f"✅ <code>{text}</code> ID'li kullanıcının VIP üyeliği kaldırıldı.", parse_mode="HTML")
+                await update.message.reply_text(f"✅ <code>{target_uid}</code> ID'li kullanıcının VIP üyeliği kaldırıldı.", parse_mode="HTML")
             else:
-                await update.message.reply_text("❌ Bu kullanıcı veritabanında bulunamadı.")
+                await update.message.reply_text("❌ Kullanıcı bulunamadı.")
 
         elif islem == "kanal_ekle":
             if not text.startswith("@"): text = "@" + text
@@ -641,14 +685,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ Bu kanal listede bulunamadı.")
 
         elif islem == "ban_yonet":
-            if text in db["banned_users"]:
-                db["banned_users"].remove(text)
+            target_uid = find_user_id_by_input(db, text) or text
+            if target_uid in db["banned_users"]:
+                db["banned_users"].remove(target_uid)
                 verileri_kaydet(db)
-                await update.message.reply_text(f"🟢 <code>{text}</code> ID'li kullanıcının banı kaldırıldı.", parse_mode="HTML")
+                await update.message.reply_text(f"🟢 <code>{target_uid}</code> ID'li kullanıcının banı kaldırıldı.", parse_mode="HTML")
             else:
-                db["banned_users"].append(text)
+                db["banned_users"].append(target_uid)
                 verileri_kaydet(db)
-                await update.message.reply_text(f"⛔️ <code>{text}</code> ID'li kullanıcı engellendi (Banlandı).", parse_mode="HTML")
+                await update.message.reply_text(f"⛔️ <code>{target_uid}</code> ID'li kullanıcı engellendi (Banlandı).", parse_mode="HTML")
 
         elif islem == "duyuru_gonder":
             basarili = 0
@@ -656,8 +701,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await context.bot.send_message(chat_id=int(uid), text=f"📢 <b>DUYURU:</b>\n\n{text}", parse_mode="HTML")
                     basarili += 1
-                except Exception:
-                    continue
+                except Exception: continue
             await update.message.reply_text(f"✅ Duyuru <code>{basarili}</code> kullanıcıya iletildi!", parse_mode="HTML")
 
         return
@@ -665,8 +709,12 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 2. CANLI API SORGU İŞLEMLERİ
     if "aktif_sorgu" in context.user_data:
         sorgu_turu = context.user_data.pop("aktif_sorgu")
+        sorgu_prompt_id = context.user_data.pop("sorgu_prompt_id", None)
 
-        # Sorgu Anı Hak Kontrolü
+        # Kullanıcının attığı girdi mesajını ve botun soru yönlendirmesini temizle
+        await mesaj_sil_guvenli(context, chat_id, user_msg_id)
+        if sorgu_prompt_id: await mesaj_sil_guvenli(context, chat_id, sorgu_prompt_id)
+
         u_info = db.get("users", {}).get(str(user_id), {})
         if not (u_info.get("vip") or user_id == ADMIN_ID):
             kullanilan = u_info.get("gunluk_sorgu", 0)
@@ -692,11 +740,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if len(parcalar) > 2: params["il"] = parcalar[2]
                 if len(parcalar) > 3: params["ilce"] = parcalar[3]
             else:
-                # Virgül kullanılmadıysa boşluğa göre ad ve soyadı ayır
                 parcalar = text.split()
                 if len(parcalar) >= 2:
-                    params["soyad"] = parcalar[-1]  # Son kelime soyad
-                    params["ad"] = " ".join(parcalar[:-1])  # Geri kalanı ad (örn: Ahmet Can)
+                    params["soyad"] = parcalar[-1]
+                    params["ad"] = " ".join(parcalar[:-1])
                 else:
                     params["ad"] = text
                     params["soyad"] = ""
@@ -729,13 +776,11 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             endpoint = "isyeri.php"
             params = {"tc": text}
 
-        # API İSTEĞİ AT
         ok, res = await api_istek_at(endpoint, params)
         
         await bekleme_msg.delete()
 
         if ok:
-            # Sorgu Başarılı Olduğunda Hakkı Düş (VIP/Admin Değilse)
             if not (u_info.get("vip") or user_id == ADMIN_ID):
                 db["users"][str(user_id)]["gunluk_sorgu"] = u_info.get("gunluk_sorgu", 0) + 1
                 verileri_kaydet(db)
