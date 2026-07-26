@@ -1,27 +1,23 @@
-# Örnek olarak aiogram kütüphanesine göre hazırlanmıştır.
-# Kendi veritabanı veya sayaç değişkenlerinizi buradaki fonksiyonlara bağlayabilirsiniz.
+from telegram import Update
+from telegram.ext import ContextTypes
 
-@dp.message_handler(commands=["panel"])
-async def panel_command(message: types.Message):
-    # Yetki kontrolü eklemek istersen buraya koyabilirsin (örn: admin ID kontrolü)
-    
-    # 📌 Buradaki değerleri kendi veritabanınızdan veya sayaçlarınızdan çekmelisiniz:
+async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Eğer sayaç veya veritabanı değişkenlerin henüz yoksa 0 olarak tanımlıyoruz
     bot_status = "Çevrimiçi"
-    total_users = 0      # Veritabanından toplam kullanıcı sayısı
-    daily_commands = 0   # Bugün çalıştırılan toplam komut
-    daily_new_users = 0  # Bugün katılan yeni kullanıcı
-    required_channel = "Ayarlanmadı" # Ayarlı olan zorunlu kanal (@kanaladi)
+    total_users = 0      
+    daily_commands = 0   
+    daily_new_users = 0  
+    required_channel = "Ayarlanmadı"
 
     panel_text = (
-        f"⚙️ **@arastirxbot** Yönetim Paneli\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "⚙️ **@arastirxbot** Yönetim Paneli\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🟢 **Sistem Durumu:** {bot_status}\n"
         f"👥 **Toplam Kullanıcı:** `{total_users}`\n"
         f"📊 **Günlük İstatistik:** `{daily_commands}` Komut / `{daily_new_users}` Yeni\n"
         f"📢 **Zorunlu Kanal:** `{required_channel}`\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"⚡ *Son Güncelleme: Anlık*"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "⚡ *Son Güncelleme: Anlık*"
     )
 
-    # MarkdownV2 veya HTML kullanıyorsanız parse_mode'u buna göre ayarlayabilirsiniz (Buradaki yapı Markdown içindir)
-    await message.reply(panel_text, parse_mode="Markdown")
+    await update.message.reply_text(panel_text, parse_mode="Markdown")
