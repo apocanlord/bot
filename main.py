@@ -95,47 +95,89 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-# HTML Uyumlu Güvenli Formatlayıcı
-def format_data_html(data, indent=0):
+# Metin içi HTML Formatlayıcı
+def format_data_text(data, indent=0):
     text = ""
     prefix = "  " * indent
     if isinstance(data, dict):
         for k, v in data.items():
             k_safe = html.escape(str(k))
             if isinstance(v, (dict, list)):
-                text += f"{prefix}🔹 <b>{k_safe.upper()}:</b>\n" + format_data_html(v, indent + 1)
+                text += f"{prefix}🔹 <b>{k_safe.upper()}:</b>\n" + format_data_text(v, indent + 1)
             else:
                 v_safe = html.escape(str(v))
                 text += f"{prefix}🔹 <b>{k_safe}:</b> <code>{v_safe}</code>\n"
     elif isinstance(data, list):
         for idx, item in enumerate(data, 1):
             if isinstance(item, (dict, list)):
-                text += f"{prefix}📌 <b>Kayıt {idx}:</b>\n" + format_data_html(item, indent + 1)
+                text += f"{prefix}📌 <b>Kayıt {idx}:</b>\n" + format_data_text(item, indent + 1)
             else:
                 item_safe = html.escape(str(item))
                 text += f"{prefix}• <code>{item_safe}</code>\n"
     return text
 
-# HTML Dosyası Oluşturucu (Çok uzun veriler için)
-def generate_full_html_page(q_type, data, count):
+# HTML Dosya Görünümü Tasarımı (Şık Dark Tema)
+def generate_html_file(q_type, data, count):
+    rendered_body = format_data_text(data)
     html_content = f"""<!DOCTYPE html>
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <title>AraştırX - {q_type.upper()} Sonuçları</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AraştırX - {q_type.upper()} Sorgu Raporu</title>
     <style>
-        body {{ font-family: monospace, Arial, sans-serif; background-color: #121212; color: #e0e0e0; padding: 20px; line-height: 1.6; }}
-        h2 {{ color: #0088cc; border-bottom: 2px solid #0088cc; padding-bottom: 5px; }}
-        .badge {{ background-color: #2e7d32; color: white; padding: 3px 8px; border-radius: 4px; font-size: 14px; }}
-        pre {{ background-color: #1e1e1e; padding: 15px; border-radius: 8px; border: 1px solid #333; overflow-x: auto; font-size: 14px; }}
-        b {{ color: #4fc3f7; }}
-        code {{ color: #a5d6a7; }}
+        body {{
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }}
+        .container {{
+            max-width: 900px;
+            margin: 0 auto;
+            background: #161b22;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            border: 1px solid #30363d;
+        }}
+        h2 {{
+            color: #58a6ff;
+            border-bottom: 2px solid #21262d;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }}
+        .count-badge {{
+            display: inline-block;
+            background-color: #238636;
+            color: #ffffff;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }}
+        pre {{
+            background-color: #0d1117;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #30363d;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 14px;
+            line-height: 1.5;
+        }}
+        b {{ color: #79c0ff; }}
+        code {{ color: #7ee787; font-family: monospace; }}
     </style>
 </head>
 <body>
-    <h2>🔍 AraştırX | Analiz Botu - {q_type.upper()} Sorgu Sonucu</h2>
-    {f'<p class="badge">Bulunan Kayıt Sayısı: {count}</p>' if count is not None else ''}
-    <pre>{format_data_html(data)}</pre>
+    <div class="container">
+        <h2>🔍 AraştırX | {q_type.upper()} Sorgu Sonuçları</h2>
+        {f'<div class="count-badge">Toplam Kayıt: {count}</div>' if count is not None else ''}
+        <pre>{rendered_body}</pre>
+    </div>
 </body>
 </html>"""
     return html_content
@@ -175,23 +217,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     data = res_json.get("data")
                     count = res_json.get("count", None)
                     
+                    raw_formatted = format_data_text(data)
+                    
                     sonuc_mesaji = f"✅ <b>Sorgu Başarılı ({q_type.upper()})</b>\n"
                     if count is not None:
                         sonuc_mesaji += f"📊 <b>Bulunan Kayıt:</b> <code>{count}</code>\n"
-                    sonuc_mesaji += "━━━━━━━━━━━━━━━━━━\n"
+                    sonuc_mesaji += "━━━━━━━━━━━━━━━━━━\n" + raw_formatted + "━━━━━━━━━━━━━━━━━━"
                     
-                    sonuc_mesaji += format_data_html(data)
-                    sonuc_mesaji += "━━━━━━━━━━━━━━━━━━"
-                    
-                    # Eğer sonuç Telegram mesaj sınırını (4000 karakter) aşıyorsa HTML Dosyası Olarak Gönder
-                    if len(sonuc_mesaji) > 3800:
-                        full_html = generate_full_html_page(q_type, data, count)
+                    # Telegram limitini (4000 Karakter) aşarsa metni KESME; Tamamını HTML Dosyası Yap!
+                    if len(sonuc_mesaji) > 3500:
+                        full_html = generate_html_file(q_type, data, count)
                         html_bytes = io.BytesIO(full_html.encode('utf-8'))
                         html_bytes.name = f"ArastirX_{q_type}_{query_text}.html"
                         
+                        caption_text = (
+                            f"✅ <b>Sorgu Başarılı ({q_type.upper()})</b>\n"
+                            f"📊 <b>Bulunan Kayıt:</b> <code>{count if count else 'Çoklu'}</code>\n\n"
+                            f"📄 <i>Veri boyutu Telegram mesaj sınırını aştığı için sonuçlar eksiksiz olarak <b>HTML Dosyası</b> formatında hazırlandı.</i>\n"
+                            f"👉 Dosyaya tıklayarak tarayıcında açabilirsin."
+                        )
+                        
                         await update.message.reply_document(
                             document=html_bytes,
-                            caption=f"📂 <b>{q_type.upper()}</b> sorgusu çok fazla veri içerdiği için <b>HTML Dosyası</b> olarak hazırlandı.\n\nİndirip tarayıcınızda açarak tüm sonuçları eksiksiz görüntüleyebilirsiniz.",
+                            caption=caption_text,
                             parse_mode="HTML"
                         )
                     else:
