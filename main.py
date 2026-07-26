@@ -17,18 +17,12 @@ TOKEN = "8646358320:AAEj6rlEpCxX1aLOXspgbsTNpVaYtvvGrbE"
 # --- VERİTABANI YÖNETİMİ (KORUMALI JSON) ---
 DATA_FILE = "bot_data.json"
 
-# HER SIFIRLANMADA/GÜNCELLEMEDE ASLA SİLİNMEYECEK SABİT KANALLAR:
 DEFAULT_CHANNELS = ["@arastirduyuru", "@arastirzorunlu"]
-
-# SUNUCU SIFIRLANSA BİLE KAYBOLMASINI İSTEMEDİĞİN ÖNCEDEN EKLİ KULLANICILAR:
-# (Varsa bilinen kullanıcı ID'lerini buraya ekleyebilirsin, boş kalsa bile koruma aktiftir)
-DEFAULT_USERS = {
-    # "6073294253": {"warnings": 0, "is_banned": False, "created_at": "2026-07-26", "username": "admin"}
-}
+DEFAULT_USERS = {}
 
 def load_data():
     data = {
-        "users": dict(DEFAULT_USERS), # Varsayılan kullanıcılar silinmez
+        "users": dict(DEFAULT_USERS),
         "channels": list(DEFAULT_CHANNELS),
         "must_join": True
     }
@@ -38,11 +32,9 @@ def load_data():
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 saved_data = json.load(f)
                 
-                # Kaydedilmiş kullanıcıları yükle ve varsayılanlarla birleştir
                 if "users" in saved_data:
                     data["users"].update(saved_data["users"])
                 
-                # Kanalları yükle ve varsayılanlarla birleştir
                 if "channels" in saved_data:
                     combined_channels = list(set(saved_data["channels"] + DEFAULT_CHANNELS))
                     data["channels"] = combined_channels
@@ -81,7 +73,7 @@ def keep_alive():
 
 # --- YARDIMCI FONKSİYONLAR ---
 def register_user(user):
-    """Kullanıcıyı ve username/tarih bilgilerini eksiksiz kaydeder, eski verileri bozmaz."""
+    """Kullanıcıyı ve username/tarih bilgilerini eksiksiz kaydeder."""
     if not user:
         return
     
@@ -92,7 +84,6 @@ def register_user(user):
 
     if uid_str not in db["users"]:
         db["users"][uid_str] = {
-            "warnings": 0, 
             "is_banned": False,
             "created_at": today_str,
             "username": username
@@ -111,15 +102,17 @@ def register_user(user):
             save_data(db)
 
 async def check_channel_subscription(user_id, context: ContextTypes.DEFAULT_TYPE):
+    uid_str = str(user_id)
+    user_info = db["users"].get(uid_str, {"is_banned": False})
+
+    # Eğer admin banladıysa engelle
+    if user_info.get("is_banned"):
+        return False, ["BANNED"]
+
     if not db["must_join"] or not db["channels"]:
         return True, []
 
     missing_channels = []
-    uid_str = str(user_id)
-    user_info = db["users"].get(uid_str, {"warnings": 0, "is_banned": False})
-
-    if user_info.get("is_banned"):
-        return False, ["BANNED"]
 
     for channel in db["channels"]:
         try:
@@ -127,33 +120,19 @@ async def check_channel_subscription(user_id, context: ContextTypes.DEFAULT_TYPE
             if member.status in ['left', 'kicked']:
                 missing_channels.append(channel)
         except Exception:
+            # Bot kanalda admin değilse veya hata olursa kullanıcıyı banlama/engelleme
             pass
 
     if missing_channels:
-        current_warns = user_info.get("warnings", 0) + 1
-        
-        if current_warns >= 3:
-            db["users"][uid_str]["is_banned"] = True
-            db["users"][uid_str]["warnings"] = 3
-            save_data(db)
-            return False, ["BANNED"]
-        else:
-            db["users"][uid_str]["warnings"] = current_warns
-            save_data(db)
-            return False, missing_channels
+        return False, missing_channels
 
     return True, []
 
 async def send_subscription_warning(chat_id, user_id, missing, context: ContextTypes.DEFAULT_TYPE):
-    uid_str = str(user_id)
-    warn_count = db["users"].get(uid_str, {}).get("warnings", 1)
-
     text = (
-        "⚠️ <b>UYARI: ZORUNLU KANAL ÜYELİĞİ EKSİK!</b>\n\n"
-        "Bu botu kullanmaya devam edebilmek için zorunlu kanallara abone olmak zorundasınız.\n\n"
-        f"🚨 <b>İhlal / Uyarı Durumu:</b> <code>{warn_count}/3</code>\n"
-        "<i>(Kanaldan çıkmaya devam ederseniz 3. uyarıda bota erişiminiz tamamen engellenecektir!)</i>\n\n"
-        "Lütfen aşağıdaki kanallara katılıp <b>'✅ Katıldım, Onayla'</b> butonuna basın:"
+        "⚠️ <b>ZORUNLU KANAL ÜYELİĞİ EKSİK!</b>\n\n"
+        "Bu botu kullanabilmek için aşağıdaki kanallara katılmış olmanız gerekmektedir.\n\n"
+        "Lütfen kanallara katıldıktan sonra <b>'✅ Katıldım, Onayla'</b> butonuna basın:"
     )
     
     keyboard = []
@@ -170,7 +149,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if db["users"].get(str(user_id), {}).get("is_banned"):
-        await update.message.reply_text("⛔ <b>Sistemden Banlandınız!</b>\nZorunlu kanallardan 3 kez ayrıldığınız için bota erişiminiz engellenmiştir.", parse_mode="HTML")
+        await update.message.reply_text("⛔ <b>Sistemden Banlandınız!</b>\nBota erişiminiz engellenmiştir.", parse_mode="HTML")
         return
 
     is_ok, missing = await check_channel_subscription(user_id, context)
@@ -252,7 +231,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text, keyboard = build_main_menu()
             await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
         else:
-            await send_subscription_warning(query.message.chat_id, user_id, missing, context)
+            await query.answer("⚠️ Hâlâ eksik kanallar var! Lütfen tümüne katılın.", show_alert=True)
         return
 
     if user_id == ADMIN_ID:
@@ -334,10 +313,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     is_ok, missing = await check_channel_subscription(user_id, context)
     if not is_ok:
-        await query.answer("⚠️ Zorunlu kanallara katılmalısınız!", show_alert=True)
         if missing == ["BANNED"]:
             await query.edit_message_text("⛔ <b>Banlandınız!</b>\nBota erişiminiz engellenmiştir.", parse_mode="HTML")
         else:
+            await query.answer("⚠️ Zorunlu kanallara katılmalısınız!", show_alert=True)
             await send_subscription_warning(query.message.chat_id, user_id, missing, context)
         return
 
@@ -448,7 +427,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif action == 'unban_user':
             if text_input in db["users"]:
                 db["users"][text_input]["is_banned"] = False
-                db["users"][text_input]["warnings"] = 0
                 save_data(db)
                 await update.message.reply_text(f"✅ <code>{text_input}</code> ID'li kullanıcının banı kaldırıldı.", parse_mode="HTML")
             else:
