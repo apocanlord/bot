@@ -24,7 +24,8 @@ def load_data():
     data = {
         "users": dict(DEFAULT_USERS),
         "channels": list(DEFAULT_CHANNELS),
-        "must_join": True
+        "must_join": True,
+        "maintenance_mode": False
     }
     
     if os.path.exists(DATA_FILE):
@@ -41,6 +42,9 @@ def load_data():
                     
                 if "must_join" in saved_data: 
                     data["must_join"] = saved_data["must_join"]
+
+                if "maintenance_mode" in saved_data:
+                    data["maintenance_mode"] = saved_data["maintenance_mode"]
         except Exception:
             pass
             
@@ -147,6 +151,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     register_user(update.effective_user)
     user_id = update.effective_user.id
 
+    # Bakım modu kontrolü (Admin hariç)
+    if db.get("maintenance_mode") and user_id != ADMIN_ID:
+        await update.message.reply_text("⚙️ <b>SİSTEM BAKIMDA!</b>\n\nBot şu an güncelleme ve bakım çalışması nedeniyle geçici olarak hizmet dışıdır. Lütfen daha sonra tekrar deneyiniz.", parse_mode="HTML")
+        return
+
     if db["users"].get(str(user_id), {}).get("is_banned"):
         await update.message.reply_text("⛔ <b>Sistemden Banlandınız!</b>\nBota erişiminiz engellenmiştir.", parse_mode="HTML")
         return
@@ -185,6 +194,7 @@ def build_admin_panel():
 
     channels_str = "\n".join([f"• {c}" for c in db["channels"]]) if db["channels"] else "<i>Ekli kanal yok.</i>"
     must_join_status = "🟢 AÇIK" if db["must_join"] else "🔴 KAPALI"
+    maint_status = "🟢 AÇIK" if db.get("maintenance_mode") else "🔴 KAPALI"
 
     panel_text = (
         "⚙️ <b>AraştırX | Yönetici Paneli</b>\n"
@@ -192,6 +202,7 @@ def build_admin_panel():
         f"📅 <b>Bugün Gelen Kullanıcı:</b> <code>{today_users}</code>\n"
         f"📊 <b>Toplam Kullanıcı:</b> <code>{total_users}</code>\n"
         f"🚫 <b>Banlı Kullanıcı:</b> <code>{banned_users}</code>\n"
+        f"🛠️ <b>Bakım Modu:</b> {maint_status}\n"
         f"📢 <b>Kanal Zorunluluğu:</b> {must_join_status}\n\n"
         f"📌 <b>Ekli Bulunan Kanallar:</b>\n{channels_str}\n"
         "━━━━━━━━━━━━━━━━━━\n"
@@ -199,6 +210,7 @@ def build_admin_panel():
     )
     
     keyboard = [
+        [InlineKeyboardButton(f"Bakım Modu: {maint_status}", callback_data="toggle_maintenance")],
         [InlineKeyboardButton(f"Kanal Zorunluluğu: {must_join_status}", callback_data="toggle_channel_req")],
         [InlineKeyboardButton("➕ Kanal Ekle", callback_data="btn_add_channel"), InlineKeyboardButton("➖ Kanal Sil", callback_data="btn_del_channel")],
         [InlineKeyboardButton("📢 Duyuru Gönder", callback_data="btn_broadcast"), InlineKeyboardButton("🛑 Duyuru İptal", callback_data="btn_cancel_broadcast")],
@@ -244,6 +256,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     data = query.data
 
+    # Bakım modu kontrolü (Admin hariç)
+    if db.get("maintenance_mode") and user_id != ADMIN_ID:
+        await query.answer("⚙️ Sistem bakımdadır! Lütfen daha sonra tekrar deneyiniz.", show_alert=True)
+        return
+
     if data == "check_subs":
         await query.answer()
         is_ok, missing = await check_channel_subscription(user_id, context)
@@ -255,7 +272,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user_id == ADMIN_ID:
-        if data == "toggle_channel_req":
+        if data == "toggle_maintenance":
+            db["maintenance_mode"] = not db.get("maintenance_mode", False)
+            save_data(db)
+            text, keyboard = build_admin_panel()
+            await query.answer("Bakım modu değiştirildi!")
+            await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
+            return
+
+        elif data == "toggle_channel_req":
             db["must_join"] = not db["must_join"]
             save_data(db)
             text, keyboard = build_admin_panel()
@@ -439,6 +464,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text_input = update.message.text.strip()
 
+    # Bakım modu kontrolü (Admin hariç)
+    if db.get("maintenance_mode") and user_id != ADMIN_ID:
+        await update.message.reply_text("⚙️ <b>SİSTEM BAKIMDA!</b>\n\nBot şu an bakım çalışması nedeniyle hizmet dışıdır. Lütfen daha sonra tekrar deneyiniz.", parse_mode="HTML")
+        return
+
     if user_id == ADMIN_ID and context.user_data.get('admin_action'):
         action = context.user_data.get('admin_action')
         context.user_data['admin_action'] = None
@@ -449,7 +479,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 save_data(db)
                 await update.message.reply_text(f"⛔ <code>{text_input}</code> ID'li kullanıcı başarıyla banlandı.", parse_mode="HTML")
             else:
-                # Kullanıcı henüz veritabanında yoksa bile banlı olarak ekle
                 db["users"][text_input] = {
                     "is_banned": True,
                     "created_at": date.today().isoformat(),
