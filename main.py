@@ -23,7 +23,7 @@ def keep_alive():
 # 2. Start Komutu (Görseldeki Tam Liste Alt Alta Menü)
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     menu_text = (
-        "🔍 **@arastirxbot** Araştırma ve Sorgu Paneline Hoş Geldiniz!\n\n"
+        "🔍 **@arastirxbot** Araştırma danışma Paneline Hoş Geldiniz!\n\n"
         "İşlem yapmak için aşağıdaki menüden bir kategori seçin:"
     )
     
@@ -117,7 +117,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif data == "stop_bot":
-        await query.message.reply_text("⏸️ Bot durdurma komutu alındı.")
+        await query.message.reply_text("⏸️ Durdurma komutu alındı.")
     elif data == "toggle_channel":
         await query.message.reply_text("📢 Kanal zorunluluğu durumu değiştirildi.")
     elif data == "welcome_msg":
@@ -133,7 +133,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "broadcast":
         await query.message.reply_text("📢 Duyuru göndermek için metni yazın.")
 
-# 5. Kullanıcının Girdiği Veriyi Alıp API'ye Gönderme ve Sonucu Basma
+# 5. API Entegrasyonu ve Veri İşleme
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('waiting_for_query'):
         query_text = update.message.text
@@ -144,25 +144,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⏳ Sorgulanıyor, lütfen bekleyin...", parse_mode="Markdown")
         
         try:
-            # 📌 API Bağlantı Noktası (Kendi API adresini ve parametrelerini buraya bağlayabilirsin)
-            # Örnek istek yapısı:
-            # api_url = f"https://api.ornekadres.com/sorgu?turt={q_type}&q={query_text}"
-            # response = requests.get(api_url, timeout=10)
-            # data = response.json()
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            api_url = f"https://arastir.vip/{q_type}.php?q={requests.utils.quote(query_text)}"
             
-            # Şimdilik API bağlantısını aktif çalışacak şablona oturtuyoruz:
-            sonuc_mesaji = (
-                f"✅ **Sorgu Sonucu ({q_type.upper()})**\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"🔎 **Aranan:** `{query_text}`\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"📋 **Veri:** API'den gelen sonuç burada görüntülenecektir."
-            )
+            response = requests.get(api_url, headers=headers, timeout=15)
             
-            await update.message.reply_text(sonuc_mesaji, parse_mode="Markdown")
-            
+            if response.status_code == 200:
+                res_data = response.json()
+                
+                if isinstance(res_data, list) and len(res_data) > 0:
+                    res_data = res_data[0]
+                    
+                if isinstance(res_data, dict) and len(res_data) > 0:
+                    sonuc_mesaji = f"✅ **Sorgu Başarılı ({q_type.upper()})**\n━━━━━━━━━━━━━━━━━━\n"
+                    for key, val in res_data.items():
+                        sonuc_mesaji += f"🔹 **{key.capitalize()}:** `{val}`\n"
+                    sonuc_mesaji += "━━━━━━━━━━━━━━━━━━"
+                else:
+                    sonuc_mesaji = f"⚠️ Aranan kriterlere uygun veri bulunamadı."
+                
+                await update.message.reply_text(sonuc_mesaji, parse_mode="Markdown")
+            else:
+                await update.message.reply_text(f"❌ API Sunucu Hatası: {response.status_code}")
+                
         except Exception as e:
-            await update.message.reply_text(f"❌ Sorgu sırasında bir hata oluştu: {str(e)}")
+            await update.message.reply_text(f"❌ Bağlantı hatası oluştu: {str(e)}")
             
     else:
         await update.message.reply_text("Menüyü açmak için /start yazabilirsin.")
