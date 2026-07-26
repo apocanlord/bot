@@ -1,7 +1,6 @@
 from flask import Flask
 import threading
-import requests
-import cloudscraper  # <-- Cloudflare engelini aşmak için bunu ekliyoruz
+from curl_cffi import requests  # <-- Standart requests yerine bunu kullanıyoruz (TLS taklidi için)
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
@@ -86,15 +85,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⏳ Sorgulanıyor, lütfen bekleyin...", parse_mode="Markdown")
         
         try:
-            # Cloudscraper kullanarak Cloudflare engellerini ve çerez duvarını bypass ediyoruz
-            scraper = cloudscraper.create_scraper(
-                browser={
-                    'browser': 'chrome',
-                    'platform': 'windows',
-                    'desktop': True
-                }
-            )
-            
             if q_type == "adsoyad":
                 parts = query_text.split(" ", 1)
                 ad = parts[0]
@@ -107,10 +97,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 api_url = f"https://arastir.vip/{q_type}.php?q={requests.utils.quote(query_text)}"
             
-            response = scraper.get(api_url, timeout=15)
+            # curl_cffi kullanarak doğrudan Chrome tarayıcı imzasıyla istek atıyoruz (Cloudflare'i takmaz)
+            response = requests.get(api_url, impersonate="chrome", timeout=15)
             
             if response.status_code == 200:
-                res_data = response.json()
+                try:
+                    res_data = response.json()
+                except:
+                    await update.message.reply_text(f"❌ API HTML döndürdü (Engel aşılamadı): {response.text[:150]}")
+                    return
                 
                 if isinstance(res_data, list) and len(res_data) > 0:
                     res_data = res_data[0]
@@ -125,7 +120,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 await update.message.reply_text(sonuc_mesaji, parse_mode="Markdown")
             else:
-                await update.message.reply_text(f"❌ API Sunucu Hatası: {response.status_code}\nDetay: {response.text[:150]}")
+                await update.message.reply_text(f"❌ API Sunucu Hatası: {response.status_code}")
                 
         except Exception as e:
             await update.message.reply_text(f"❌ Bağlantı hatası oluştu: {str(e)}")
