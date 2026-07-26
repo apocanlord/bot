@@ -112,7 +112,6 @@ def kullanici_kaydet_ve_guncelle(user, referrer_id=None):
             if ref_user["davet_sayisi"] % 10 == 0:
                 ref_user["vip"] = True
                 suan = datetime.now()
-                # Zaten süreli vip varsa üstüne ekle
                 if ref_user.get("vip_bitis"):
                     try:
                         mevcut_bitis = datetime.strptime(ref_user["vip_bitis"], "%Y-%m-%d %H:%M")
@@ -515,14 +514,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # SORGU BUTONLARI YÖNLENDİRMESİ
     if data.startswith("sorgu_"):
-        # Hak Kontrolü (Butona basıldığı anda)
         u_info = db.get("users", {}).get(str(user_id), {})
         if not (u_info.get("vip") or user_id == ADMIN_ID):
             kullanilan = u_info.get("gunluk_sorgu", 0)
             if kullanilan >= GUNLUK_UCRETSIZ_LIMIT:
                 msg = (
                     f"⚠️ <b>Günlük Ücretsiz Sorgu Sınırına Ulaştınız!</b>\n\n"
-                    f"Günlük ücretsiz sorgu limitiniz (<b>{GUNLUK_UCRETSIZ_LIMIT}</b>) dolmuştur.\n"
+                    f"Günlük ücretsiz sorgu limitiniz (<b>{GUNLUK_UCRETSIZ_LIMIT}</b>) dolmıştır.\n"
                     f"Sınırsız ve kesintisiz sorgu yapmak için VIP üyelik satın alabilir veya arkadaşlarınızı davet ederek VIP kazanabilirsiniz."
                 )
                 kb = InlineKeyboardMarkup([[InlineKeyboardButton("👑 VIP Satın Al / Fiyatlar", callback_data="vip_fiyatlar")]])
@@ -533,7 +531,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         rehber = {
             "sorgu_tc": "Lütfen sorgulanacak <b>11 haneli TC Kimlik Numarasını</b> girin:",
-            "sorgu_adsoyad": "Lütfen Ad ve Soyad girin. Ek parametreler için virgül kullanabilirsiniz:\n\n<b>Format:</b> <code>Ad, Soyad, İl, İlçe</code>\n<b>Örnek:</b> <code>AHMET, YILMAZ, İSTANBUL</code>",
+            "sorgu_adsoyad": "Lütfen Ad ve Soyad girin. Ek parametreler için virgül kullanabilirsiniz:\n\n<b>Örnekler:</b>\n• <code>AHMET YILMAZ</code>\n• <code>AHMET, YILMAZ, İSTANBUL</code>",
             "sorgu_aile": "Lütfen Aile sorgusu için <b>TC Kimlik Numarasını</b> girin:",
             "sorgu_sulale": "Lütfen Sülale sorgusu için <b>TC Kimlik Numarasını</b> girin:",
             "sorgu_cocuk": "Lütfen Çocuk sorgusu için <b>TC Kimlik Numarasını</b> girin:",
@@ -687,11 +685,21 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif sorgu_turu == "sorgu_adsoyad":
             endpoint = "adsoyad.php"
-            parcalar = [p.strip() for p in text.split(",")]
-            params["ad"] = parcalar[0]
-            if len(parcalar) > 1: params["soyad"] = parcalar[1]
-            if len(parcalar) > 2: params["il"] = parcalar[2]
-            if len(parcalar) > 3: params["ilce"] = parcalar[3]
+            if "," in text:
+                parcalar = [p.strip() for p in text.split(",")]
+                params["ad"] = parcalar[0]
+                if len(parcalar) > 1: params["soyad"] = parcalar[1]
+                if len(parcalar) > 2: params["il"] = parcalar[2]
+                if len(parcalar) > 3: params["ilce"] = parcalar[3]
+            else:
+                # Virgül kullanılmadıysa boşluğa göre ad ve soyadı ayır
+                parcalar = text.split()
+                if len(parcalar) >= 2:
+                    params["soyad"] = parcalar[-1]  # Son kelime soyad
+                    params["ad"] = " ".join(parcalar[:-1])  # Geri kalanı ad (örn: Ahmet Can)
+                else:
+                    params["ad"] = text
+                    params["soyad"] = ""
 
         elif sorgu_turu == "sorgu_aile":
             endpoint = "aile.php"
