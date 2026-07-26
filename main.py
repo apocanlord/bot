@@ -1,9 +1,8 @@
 from flask import Flask
 import threading
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# Senin Telegram ID'n panele erişim için eklendi
 ADMIN_ID = 6073294253
 
 # 1. Render Port İsteğini Karşılamak İçin Mini Web Sunucusu
@@ -74,7 +73,35 @@ async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(panel_text, parse_mode="Markdown", reply_markup=reply_markup)
 
-# 4. Ana Çalıştırma Bloğu
+# 4. Buton Tıklama Yönetimi (Callback Handler)
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer() # Butondaki yüklenme animasyonunu kapatır
+
+    data = query.data
+
+    if data == "make_query":
+        await query.message.reply_text("🔍 Sorgu ekranı yakında aktif olacaktır.")
+    elif data == "my_profile":
+        await query.message.reply_text("👤 Profil bilgileriniz yükleniyor...")
+    elif data == "stop_bot":
+        await query.message.reply_text("⏸️ Bot durdurma komutu alındı.")
+    elif data == "toggle_channel":
+        await query.message.reply_text("📢 Kanal zorunluluğu durumu değiştirildi.")
+    elif data == "welcome_msg":
+        await query.message.reply_text("💬 Hoşgeldin mesajı düzenleme paneli.")
+    elif data == "features":
+        await query.message.reply_text("⚙️ Özellik yönetimi menüsü.")
+    elif data == "list_users":
+        await query.message.reply_text("👥 Toplam kullanıcı listesi çıkarılıyor...")
+    elif data == "ban_management":
+        await query.message.reply_text("⛔ Ban yönetimi menüsü.")
+    elif data == "ref_system":
+        await query.message.reply_text("🔗 Referans sistemi ayarları.")
+    elif data == "broadcast":
+        await query.message.reply_text("📢 Duyuru göndermek için metni yazın.")
+
+# 5. Ana Çalıştırma Bloğu
 if __name__ == '__main__':
     keep_alive()
     
@@ -84,5 +111,6 @@ if __name__ == '__main__':
     
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("panel", panel_command))
+    application.add_handler(CallbackQueryHandler(button_handler))
     
     application.run_polling()
