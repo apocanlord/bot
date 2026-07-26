@@ -148,7 +148,7 @@ def find_user_id_by_input(db, input_str):
 
 
 # ==========================================
-# 4. YARDIMCI FONKSİYONLAR & API
+# 4. YARDIMCI FONKSİYONLAR & GÜÇLENDİRİLMİŞ API
 # ==========================================
 async def mesaj_sil_guvenli(context, chat_id, message_id):
     try:
@@ -174,9 +174,13 @@ async def guvenli_html_mesaj_gonder(update_or_msg, text: str):
 
 async def api_istek_at(endpoint: str, params: dict):
     url = f"{API_BASE_URL}/{endpoint}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, timeout=12) as response:
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.get(url, params=params, headers=headers, timeout=15) as response:
                 if response.status == 200:
                     data = await response.json()
                     return True, data
