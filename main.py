@@ -1,23 +1,21 @@
-from telegram import Update
-from telegram.ext import ContextTypes
+from flask import Flask
+import threading
 
-async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Eğer sayaç veya veritabanı değişkenlerin henüz yoksa 0 olarak tanımlıyoruz
-    bot_status = "Çevrimiçi"
-    total_users = 0      
-    daily_commands = 0   
-    daily_new_users = 0  
-    required_channel = "Ayarlanmadı"
+# 1. Mini Web Sunucusu (Render'ın port isteğini karşılamak için)
+app = Flask('')
 
-    panel_text = (
-        "⚙️ **@arastirxbot** Yönetim Paneli\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🟢 **Sistem Durumu:** {bot_status}\n"
-        f"👥 **Toplam Kullanıcı:** `{total_users}`\n"
-        f"📊 **Günlük İstatistik:** `{daily_commands}` Komut / `{daily_new_users}` Yeni\n"
-        f"📢 **Zorunlu Kanal:** `{required_channel}`\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "⚡ *Son Güncelleme: Anlık*"
-    )
+@app.route('/')
+def home():
+    return "Bot Aktif ve Çalışıyor!"
 
-    await update.message.reply_text(panel_text, parse_mode="Markdown")
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = threading.Thread(target=run_flask)
+    t.start()
+
+# Botu başlatmadan önce web sunucusunu tetikliyoruz
+if __name__ == '__main__':
+    keep_alive()
+    # Buradan sonra mevcut bot çalıştırma kodun (örn: application.run_polling() vb.) devam edebilir.
