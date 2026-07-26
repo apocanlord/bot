@@ -1,5 +1,6 @@
 import os
 import html
+import io
 import threading
 import requests
 from flask import Flask
@@ -94,7 +95,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-# HTML Uyumlu Güvenli Formatlayıcı (Karakter Patlamasını Önler)
+# HTML Uyumlu Güvenli Formatlayıcı
 def format_data_html(data, indent=0):
     text = ""
     prefix = "  " * indent
@@ -114,6 +115,30 @@ def format_data_html(data, indent=0):
                 item_safe = html.escape(str(item))
                 text += f"{prefix}• <code>{item_safe}</code>\n"
     return text
+
+# HTML Dosyası Oluşturucu (Çok uzun veriler için)
+def generate_full_html_page(q_type, data, count):
+    html_content = f"""<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>AraştırX - {q_type.upper()} Sonuçları</title>
+    <style>
+        body {{ font-family: monospace, Arial, sans-serif; background-color: #121212; color: #e0e0e0; padding: 20px; line-height: 1.6; }}
+        h2 {{ color: #0088cc; border-bottom: 2px solid #0088cc; padding-bottom: 5px; }}
+        .badge {{ background-color: #2e7d32; color: white; padding: 3px 8px; border-radius: 4px; font-size: 14px; }}
+        pre {{ background-color: #1e1e1e; padding: 15px; border-radius: 8px; border: 1px solid #333; overflow-x: auto; font-size: 14px; }}
+        b {{ color: #4fc3f7; }}
+        code {{ color: #a5d6a7; }}
+    </style>
+</head>
+<body>
+    <h2>🔍 AraştırX | Analiz Botu - {q_type.upper()} Sorgu Sonucu</h2>
+    {f'<p class="badge">Bulunan Kayıt Sayısı: {count}</p>' if count is not None else ''}
+    <pre>{format_data_html(data)}</pre>
+</body>
+</html>"""
+    return html_content
 
 # 5. Gelen Mesajları ve API İsteklerini İşleme
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -158,11 +183,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     sonuc_mesaji += format_data_html(data)
                     sonuc_mesaji += "━━━━━━━━━━━━━━━━━━"
                     
-                    # Telegram 4096 karakter sınırına takılmasın
-                    if len(sonuc_mesaji) > 4000:
-                        sonuc_mesaji = sonuc_mesaji[:3900] + "\n\n⚠️ <i>Sonuç çok uzun olduğu için kısaltıldı.</i>"
+                    # Eğer sonuç Telegram mesaj sınırını (4000 karakter) aşıyorsa HTML Dosyası Olarak Gönder
+                    if len(sonuc_mesaji) > 3800:
+                        full_html = generate_full_html_page(q_type, data, count)
+                        html_bytes = io.BytesIO(full_html.encode('utf-8'))
+                        html_bytes.name = f"ArastirX_{q_type}_{query_text}.html"
                         
-                    await update.message.reply_text(sonuc_mesaji, parse_mode="HTML")
+                        await update.message.reply_document(
+                            document=html_bytes,
+                            caption=f"📂 <b>{q_type.upper()}</b> sorgusu çok fazla veri içerdiği için <b>HTML Dosyası</b> olarak hazırlandı.\n\nİndirip tarayıcınızda açarak tüm sonuçları eksiksiz görüntüleyebilirsiniz.",
+                            parse_mode="HTML"
+                        )
+                    else:
+                        await update.message.reply_text(sonuc_mesaji, parse_mode="HTML")
                 else:
                     err_msg = html.escape(str(res_json.get("error", "Bilinmeyen bir hata oluştu.")))
                     await update.message.reply_text(f"⚠️ <b>Hata:</b> {err_msg}", parse_mode="HTML")
