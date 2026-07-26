@@ -1,6 +1,7 @@
 import os
 import json
 import threading
+import aiohttp
 from datetime import datetime
 from flask import Flask
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -20,7 +21,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "AraştırX Bot 7/24 Aktif!"
+    return "AraştırX Bot 7/24 Aktif ve API Bağlantısı Tamamlandı!"
 
 def run_flask():
     app.run(host='0.0.0.0', port=10000)
@@ -31,11 +32,12 @@ def keep_alive():
 
 
 # ==========================================
-# 2. SABİT AYARLAR & AYAR DOSYASI
+# 2. SABİT AYARLAR & YAPILANDIRMA
 # ==========================================
 BOT_TOKEN = "8646358320:AAEj6rlEpCxX1aLOXspgbsTNpVaYtvvGrbE"
 ADMIN_ID = 6073294253
 VERI_DOSYASI = "database.json"
+API_BASE_URL = "http://arastir.vip/api"
 
 
 # ==========================================
@@ -56,8 +58,6 @@ def verileri_yukle():
         return default_data
     with open(VERI_DOSYASI, "r", encoding="utf-8") as f:
         data = json.load(f)
-        
-        # Eksik alan kontrolleri
         if "banned_users" not in data: data["banned_users"] = []
         if "bugun_gelen" not in data: data["bugun_gelen"] = 0
         if "son_bugun_tarih" not in data: data["son_bugun_tarih"] = datetime.now().strftime("%Y-%m-%d")
@@ -65,7 +65,6 @@ def verileri_yukle():
         if "kanal_sarti" not in data: data["kanal_sarti"] = True
         if "zorunlu_kanallar" not in data: data["zorunlu_kanallar"] = ["@arastirduyuru", "@arastirzorunlu"]
         
-        # Günlük sayaç sıfırlama
         today = datetime.now().strftime("%Y-%m-%d")
         if data.get("son_bugun_tarih") != today:
             data["bugun_gelen"] = 0
@@ -101,7 +100,136 @@ def kullanici_kaydet_ve_guncelle(user):
 
 
 # ==========================================
-# 4. KANAL KATILIM KONTROLÜ
+# 4. API İSTEK SÜRÜCÜSÜ VE BİÇİMLENDİRME
+# ==========================================
+async def api_istek_at(endpoint: str, params: dict):
+    url = f"{API_BASE_URL}/{endpoint}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=12) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return True, data
+                else:
+                    return False, f"API Hatası (HTTP {response.status})"
+    except Exception as e:
+        return False, f"Sunucu Bağlantı Hatası: {str(e)}"
+
+def format_api_response(sorgu_turu: str, res: dict) -> str:
+    if not res.get("success"):
+        return f"❌ **Hata:** {res.get('error', 'Sonuç bulunamadı veya işlem başarısız.')}"
+
+    data = res.get("data")
+    if not data:
+        return "❌ **Kayıt bulunamadı.**"
+
+    # 1. TC SORGU
+    if sorgu_turu == "sorgu_tc":
+        return (
+            f"🖨 **TC Kimlik Sorgu Sonucu**\n\n"
+            f"• **TC:** `{data.get('TC', '-')}`\n"
+            f"• **Ad Soyad:** {data.get('ADI', '-')} {data.get('SOYADI', '-')}\n"
+            f"• **Doğum Tarihi:** {data.get('DOGUMTARIHI', '-')}\n"
+            f"• **Nüfus İl / İlçe:** {data.get('NUFUSIL', '-')} / {data.get('NUFUSILCE', '-')}\n"
+            f"• **Anne Adı / TC:** {data.get('ANNEADI', '-')} ({data.get('ANNETC', '-')})\n"
+            f"• **Baba Adı / TC:** {data.get('BABAADI', '-')} ({data.get('BABATC', '-')})\n"
+            f"• **Uyruk:** {data.get('UYRUK', '-')}"
+        )
+
+    # 2. AD SOYAD SORGU
+    elif sorgu_turu == "sorgu_adsoyad":
+        count = res.get("count", len(data))
+        out = f"👤 **Ad Soyad Sorgu Sonuçları** ({count} Kayıt):\n\n"
+        for idx, item in enumerate(data[:15], 1): # İlk 15 kayıt
+            out += f"*{idx}.* `{item.get('TC')}` | {item.get('ADI')} {item.get('SOYADI')} | DT: {item.get('DOGUMTARIHI')}\n"
+        if count > 15:
+            out += "\n*(Sonuçlar çok fazla olduğu için ilk 15 kişi gösterildi)*"
+        return out
+
+    # 3. AİLE SORGU
+    elif sorgu_turu == "sorgu_aile":
+        anne = data.get("anne", {})
+        baba = data.get("baba", {})
+        kardesler = data.get("kardesler", [])
+        
+        out = f"👥 **Aile Sorgu Sonucu**\n\n"
+        out += f"👩 **Anne:** {anne.get('ADI', '-')} {anne.get('SOYADI', '')} (`{anne.get('TC', '-')}`)\n"
+        out += f"👨 **Baba:** {baba.get('ADI', '-')} {baba.get('SOYADI', '')} (`{baba.get('TC', '-')}`)\n\n"
+        out += f"👶 **Kardeşler ({len(kardesler)}):**\n"
+        for k in kardesler:
+            out += f"• `{k.get('TC')}` - {k.get('ADI')} {k.get('SOYADI')}\n"
+        return out
+
+    # 4. SÜLALE SORGU
+    elif sorgu_turu == "sorgu_sulale":
+        kendisi = data.get("kendisi", {})
+        anne = data.get("anne", {})
+        baba = data.get("baba", {})
+        anneanne = data.get("anneanne", {})
+        dede_a = data.get("dede_anne_tarafi", {})
+        babaanne = data.get("babaanne", {})
+        dede_b = data.get("dede_baba_tarafi", {})
+        
+        return (
+            f"👥 **Sülale Sorgu Sonucu**\n\n"
+            f"👤 **Kendisi:** {kendisi.get('ADI', '-')} (`{kendisi.get('TC', '-')}`)\n"
+            f"👩 **Anne:** {anne.get('ADI', '-')} (`{anne.get('TC', '-')}`)\n"
+            f"👨 **Baba:** {baba.get('ADI', '-')} (`{baba.get('TC', '-')}`)\n"
+            f"👵 **Anneanne:** {anneanne.get('ADI', '-')} (`{anneanne.get('TC', '-')}`)\n"
+            f"👴 **Dede (Anne T.):** {dede_a.get('ADI', '-')} (`{dede_a.get('TC', '-')}`)\n"
+            f"👵 **Babaanne:** {babaanne.get('ADI', '-')} (`{babaanne.get('TC', '-')}`)\n"
+            f"👴 **Dede (Baba T.):** {dede_b.get('ADI', '-')} (`{dede_b.get('TC', '-')}`)"
+        )
+
+    # 5. ÇOCUK SORGU
+    elif sorgu_turu == "sorgu_cocuk":
+        count = res.get("count", len(data))
+        out = f"👶 **Çocuk Sorgu Sonuçları** ({count} Kayıt):\n\n"
+        for item in data:
+            out += f"• `{item.get('TC')}` | {item.get('ADI')} {item.get('SOYADI')} | DT: {item.get('DOGUMTARIHI')}\n"
+        return out
+
+    # 6. ADRES SORGU
+    elif sorgu_turu == "sorgu_adres":
+        return (
+            f"📍 **Adres & İkametgah Bilgisi**\n\n"
+            f"• **TC:** `{data.get('KimlikNo', '-')}`\n"
+            f"• **Ad Soyad:** {data.get('AdSoyad', '-')}\n"
+            f"• **Doğum Yeri:** {data.get('DogumYeri', '-')}\n"
+            f"• **Vergi No:** {data.get('VergiNumarasi', '-')}\n"
+            f"• **İkametgah:** {data.get('Ikametgah', '-')}"
+        )
+
+    # 7. GSM -> TC
+    elif sorgu_turu == "sorgu_gsmtc":
+        tcleri = "\n".join([f"• `{tc}`" for tc in data])
+        return f"📱 **GSM → TC Sorgu Sonucu**\n\n{tcleri}"
+
+    # 8. TC -> GSM
+    elif sorgu_turu == "sorgu_tcgsm":
+        gsmleri = "\n".join([f"• `{gsm}`" for gsm in data])
+        return f"📱 **TC → GSM Sorgu Sonucu**\n\n{gsmleri}"
+
+    # 9. İŞYERİ SORGU
+    elif sorgu_turu == "sorgu_isyeri":
+        out = f"🏢 **İşyeri & SGK Bilgileri** ({res.get('count', len(data))} Kayıt):\n\n"
+        for item in data:
+            out += (
+                f"• **Çalışan:** {item.get('calisanAdSoyad')}\n"
+                f"• **İşyeri Ünvanı:** {item.get('isyeriUnvani')}\n"
+                f"• **SGK Sicil No:** `{item.get('isyeriSgkSicilNo')}`\n"
+                f"• **İşe Giriş Tarihi:** {item.get('iseGirisTarihi')}\n"
+                f"• **Sektör:** {item.get('isyeriSektoru')}\n"
+                f"• **Durum:** {item.get('calismaDurumu')}\n"
+                f"────────────────────────\n"
+            )
+        return out
+
+    return "⚠️ Bilinmeyen sorgu formatı."
+
+
+# ==========================================
+# 5. KANAL KATILIM KONTROLÜ
 # ==========================================
 async def kanallara_katildi_mi(bot, user_id):
     db = verileri_yukle()
@@ -121,20 +249,18 @@ async def kanallara_katildi_mi(bot, user_id):
 
 
 # ==========================================
-# 5. KULLANICI ANA MENÜSÜ (/start)
+# 6. KULLANICI ANA MENÜSÜ (/start)
 # ==========================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db = verileri_yukle()
     s_id = str(user.id)
     
-    # Ban Kontrolü
     if s_id in db.get("banned_users", []):
         msg = "❌ **Bot kullanımınız engellenmiştir (Banlandınız).**"
         if update.message: await update.message.reply_text(msg)
         return
 
-    # Bakım Modu Kontrolü
     if db.get("bakim_modu") and user.id != ADMIN_ID:
         msg = "⚙️ **Bot şu an bakım modundadır. Lütfen daha sonra tekrar deneyiniz.**"
         if update.message: await update.message.reply_text(msg)
@@ -142,7 +268,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     u_info = kullanici_kaydet_ve_guncelle(user)
 
-    # Kanal Şartı Kontrolü
     katildi, eksikler = await kanallara_katildi_mi(context.bot, user.id)
     if not katildi:
         keyboard = []
@@ -158,7 +283,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.callback_query.message.edit_text(msg, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
-    # Kullanıcı Arayüzü (Resim 2 Birebir Uyumlu)
     hak_text = "Sınırsız  ∞" if (u_info.get("vip") or user.id == ADMIN_ID) else "3 / 3"
     
     mesaj = (
@@ -187,7 +311,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ==========================================
-# 6. YÖNETİCİ PANELİ (/panel) (Resim 1 Uyumlu)
+# 7. YÖNETİCİ PANELİ (/panel)
 # ==========================================
 async def panel_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -240,7 +364,7 @@ async def admin_panel_goster(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 # ==========================================
-# 7. PANEL BUTON İŞLEYİCİLERİ
+# 8. BUTON İŞLEYİCİSİ
 # ==========================================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -254,7 +378,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
         return
 
-    # --- ADMIN BUTONLARI ---
+    # ADMIN BUTONLARI
     if user_id == ADMIN_ID:
         if data == "adm_panel_refresh":
             await admin_panel_goster(update, context)
@@ -318,27 +442,43 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.edit_text(metin, reply_markup=kb, parse_mode="Markdown")
             return
 
-    # --- KULLANICI SORGU BUTONLARI BILDIRIMI ---
+    # SORGU BUTONLARI YÖNLENDİRMESİ
     if data.startswith("sorgu_"):
-        sorgu_adi = data.replace("sorgu_", "").upper()
-        await query.message.reply_text(f"🔍 **{sorgu_adi} Sorgulamak için arama verisini mesaj olarak iletin.**", parse_mode="Markdown")
+        context.user_data["aktif_sorgu"] = data
+        
+        rehber = {
+            "sorgu_tc": "Lütfen sorgulanacak **11 haneli TC Kimlik Numarasını** girin:",
+            "sorgu_adsoyad": "Lütfen Ad ve Soyad girin. Ek parametreler için virgül kullanabilirsiniz:\n*Format:* `Ad, Soyad, İl, İlçe`\n*Örnek:* `AHMET, YILMAZ, İSTANBUL`",
+            "sorgu_aile": "Lütfen Aile sorgusu için **TC Kimlik Numarasını** girin:",
+            "sorgu_sulale": "Lütfen Sülale sorgusu için **TC Kimlik Numarasını** girin:",
+            "sorgu_cocuk": "Lütfen Çocuk sorgusu için **TC Kimlik Numarasını** girin:",
+            "sorgu_adres": "Lütfen Adres/İkametgah sorgusu için **TC Kimlik Numarasını** girin:",
+            "sorgu_gsmtc": "Lütfen **GSM Numarasını** girin (Örn: `05551234567`):",
+            "sorgu_tcgsm": "Lütfen GSM Numaralarını öğrenmek istediğiniz **TC Kimlik Numarasını** girin:",
+            "sorgu_isyeri": "Lütfen İşyeri/SGK sorgusu için **TC Kimlik Numarasını** girin:"
+        }
+        
+        msg = rehber.get(data, "Lütfen sorgulamak istediğiniz veriyi yazın:")
+        await query.message.reply_text(f"🔍 {msg}", parse_mode="Markdown")
+
     elif data == "profil_im":
         u_info = db.get("users", {}).get(str(user_id), {})
         vip_st = "Evet 💎" if u_info.get("vip") else "Hayır"
         await query.message.reply_text(f"👤 **Profil Bilgileriniz:**\n\n• **Ad:** {u_info.get('name')}\n• **Kullanıcı Adı:** {u_info.get('username')}\n• **ID:** `{user_id}`\n• **VIP:** {vip_st}", parse_mode="Markdown")
+    
     elif data == "vip_fiyatlar":
         await query.message.reply_text("💎 **VIP Üyelik Fiyatları:**\n\n• 1 Aylık VIP: 1250₺\n\nSatın almak için yönetici ile iletişime geçiniz.", parse_mode="Markdown")
 
 
 # ==========================================
-# 8. METİN GİRDİLERİ (ADMIN İŞLEMLERİ)
+# 9. METİN VE API İSTEK İŞLEYİCİSİ
 # ==========================================
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
     db = verileri_yukle()
-    
-    # Beklenen Admin İşlemi Var mı?
+
+    # 1. ADMIN BEKLEYEN İŞLEMLERİ
     if user_id == ADMIN_ID and "beklenen_islem" in context.user_data:
         islem = context.user_data.pop("beklenen_islem")
 
@@ -398,9 +538,69 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
+    # 2. CANLI API SORGU İŞLEMLERİ
+    if "aktif_sorgu" in context.user_data:
+        sorgu_turu = context.user_data.pop("aktif_sorgu")
+        
+        bekleme_msg = await update.message.reply_text("⏳ **Sorgunuz API üzerinden işleniyor, lütfen bekleyin...**", parse_mode="Markdown")
+        
+        endpoint = ""
+        params = {}
+
+        if sorgu_turu == "sorgu_tc":
+            endpoint = "tc.php"
+            params = {"tc": text}
+
+        elif sorgu_turu == "sorgu_adsoyad":
+            endpoint = "adsoyad.php"
+            parcalar = [p.strip() for p in text.split(",")]
+            params["ad"] = parcalar[0]
+            if len(parcalar) > 1: params["soyad"] = parcalar[1]
+            if len(parcalar) > 2: params["il"] = parcalar[2]
+            if len(parcalar) > 3: params["ilce"] = parcalar[3]
+
+        elif sorgu_turu == "sorgu_aile":
+            endpoint = "aile.php"
+            params = {"tc": text}
+
+        elif sorgu_turu == "sorgu_sulale":
+            endpoint = "sulale.php"
+            params = {"tc": text}
+
+        elif sorgu_turu == "sorgu_cocuk":
+            endpoint = "cocuk.php"
+            params = {"tc": text}
+
+        elif sorgu_turu == "sorgu_adres":
+            endpoint = "adres.php"
+            params = {"tc": text}
+
+        elif sorgu_turu == "sorgu_gsmtc":
+            endpoint = "gsmtc.php"
+            params = {"gsm": text}
+
+        elif sorgu_turu == "sorgu_tcgsm":
+            endpoint = "tcgsm.php"
+            params = {"tc": text}
+
+        elif sorgu_turu == "sorgu_isyeri":
+            endpoint = "isyeri.php"
+            params = {"tc": text}
+
+        # API İSTEĞİ AT
+        ok, res = await api_istek_at(endpoint, params)
+        
+        await bekleme_msg.delete()
+
+        if ok:
+            cevap = format_api_response(sorgu_turu, res)
+            await update.message.reply_text(cevap, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(f"❌ **API Bağlantı Hatası:** {res}")
+
 
 # ==========================================
-# 9. BOTU BAŞLAT
+# 10. BOTU BAŞLAT
 # ==========================================
 if __name__ == '__main__':
     keep_alive()
@@ -412,5 +612,5 @@ if __name__ == '__main__':
     bot_app.add_handler(CallbackQueryHandler(button_handler))
     bot_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler))
 
-    print("AraştırX Panel Botu Aktif!")
+    print("AraştırX Canlı API Bağlantılı Bot Aktif!")
     bot_app.run_polling()
