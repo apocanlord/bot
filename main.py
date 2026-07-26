@@ -73,7 +73,7 @@ async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(panel_text, parse_mode="Markdown", reply_markup=reply_markup)
 
-# 4. Buton Tıklama Yönetimi ve Sorgu Ekranını Tetikleme
+# 4. Buton Tıklama Yönetimi
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -81,20 +81,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data == "make_query":
-        # Kullanıcı sorgu yap butonuna bastığında burası çalışacak
+        # Kullanıcı artık buraya basınca metin girmesi istenecek
         context.user_data['waiting_for_query'] = True
         await query.message.reply_text(
             "🔍 **Sorgu Ekranı**\n\n"
-            "Lütfen sorgulamak istediğiniz bilgiyi (TC, Ad Soyad, Telefon vb.) aşağıya yazın:"
-        , parse_mode="Markdown")
+            "Lütfen sorgulamak istediğiniz bilgiyi (TC, Ad Soyad, Telefon vb.) mesaj olarak yazın:",
+            parse_mode="Markdown"
+        )
     
     elif data == "my_profile":
         user = update.effective_user
         await query.message.reply_text(
             f"👤 **Profil Bilgileriniz**\n\n"
             f"🆔 ID: `{user.id}`\n"
-            f"İsim: {user.first_name}"
-        , parse_mode="Markdown")
+            f"İsim: {user.first_name}",
+            parse_mode="Markdown"
+        )
         
     elif data == "stop_bot":
         await query.message.reply_text("⏸️ Bot durdurma komutu alındı.")
@@ -113,30 +115,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "broadcast":
         await query.message.reply_text("📢 Duyuru göndermek için metni yazın.")
 
-# 5. Kullanıcının Yazdığı Sorgu Metnini Yakalama ve İşleme
+# 5. Kullanıcının Yazdığı Sorgu Metnini Yakalama
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Eğer kullanıcı "Sorgu Yap" butonuna basmışsa ve metin bekliyorsak
     if context.user_data.get('waiting_for_query'):
         query_text = update.message.text
-        
-        # Bekleme durumunu sıfırlıyoruz
         context.user_data['waiting_for_query'] = False
         
-        # Burada kullanıcının girdiği sorgu verisiyle arama yaptırabilirsin
         await update.message.reply_text(
             f"🔍 **Sorgulanan Veri:** `{query_text}`\n\n"
-            "⏳ Veritabanında aranıyor, lütfen bekleyin...",
+            "⏳ Veritabanında aranıyor...",
             parse_mode="Markdown"
         )
-        
-        # Örnek sonuç simülasyonu (Kendi API veya DB bağlayacağın yer burasıdır)
-        # ---------------------------------------------------------
-        # sonuç = api_sorgula(query_text)
-        # ---------------------------------------------------------
-
     else:
-        # Normal sohbet mesajları için genel yanıt
-        await update.message.reply_text("Komutlar için /start yazabilirsin.")
+        await update.message.reply_text("İşlem yapmak için /start yazabilirsin.")
 
 # 6. Ana Çalıştırma Bloğu
 if __name__ == '__main__':
