@@ -3,6 +3,9 @@ import threading
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
+# Senin Telegram ID'n panele erişim için eklendi
+ADMIN_ID = 6073294253
+
 # 1. Render Port İsteğini Karşılamak İçin Mini Web Sunucusu
 app = Flask('')
 
@@ -17,18 +20,34 @@ def keep_alive():
     t = threading.Thread(target=run_flask)
     t.start()
 
-# 2. Start Komutu
+# 2. Start Komutu (Ana Sorgu Menüsü)
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Bot aktif! Yönetim paneli için /panel yazabilirsin.")
+    menu_text = (
+        "🔍 **@arastirxbot** Araştırma ve Sorgu Paneline Hoş Geldiniz!\n\n"
+        "İşlem yapmak için aşağıdaki menüyü kullanabilirsiniz:"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("🔍 Sorgu Yap", callback_data="make_query")],
+        [InlineKeyboardButton("👤 Profilim", callback_data="my_profile")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(menu_text, parse_mode="Markdown", reply_markup=reply_markup)
 
-# 3. Panel Komutu (Görseldeki Tasarım ve Gerçek Butonlar)
+# 3. Panel Komutu (Sadece Admin Erişebilir)
 async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 📌 Buraya veritabanından çektiğin gerçek verileri bağlayabilirsin
+    user_id = update.effective_user.id
+    
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ Bu komutu kullanma yetkiniz yok.")
+        return
+
     bot_status = "Aktif"
     total_users = 2      
     daily_commands = 4   
     daily_new_users = 2  
-    required_channel = "@arastirzorunlu" # Veya "Yok"
+    required_channel = "@arastirzorunlu"
 
     panel_text = (
         "⚙️ **@arastirxbot**\n"
@@ -41,7 +60,6 @@ async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━"
     )
 
-    # Ekran görüntündeki interaktif yönetim butonları
     keyboard = [
         [InlineKeyboardButton("⏸️ Durdur", callback_data="stop_bot")],
         [InlineKeyboardButton("📢 Kanal Zorunluluğu 🟢", callback_data="toggle_channel")],
@@ -64,7 +82,6 @@ if __name__ == '__main__':
     
     application = ApplicationBuilder().token(TOKEN).build()
     
-    # Komutları ekliyoruz
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("panel", panel_command))
     
