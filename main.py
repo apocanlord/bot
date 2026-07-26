@@ -8,7 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # Token, Admin ID, Kanal ve API Bilgileri
-BOT_TOKEN = "8646358320:AAFuW7CHUPtCgT0wgfP9i2X1v2K9j8a5V4M"
+BOT_TOKEN = "8646358320:AAFuW7CHUPtCgT0wgfP9xZxf6URYTWOoYWE"
 ADMIN_ID = 6073294253
 CHANNEL = "@arastirduyuru"
 BASE_URL = 'http://arastir.vip/api'
