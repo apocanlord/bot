@@ -64,16 +64,17 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        f"✨ Hoş Geldin {user.first_name}! Lütfen yapmak istediğin sorgu türünü seçin veya komut kullanın:",
+        f"✨ Hoş Geldin {user.first_name}! Lütfen yapmak istediğin sorgu türünü seçin:",
         reply_markup=reply_markup
     )
 
+# BUTON VE PANEL YÖNETİCİSİ
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
     data = query.data
     
+    # Kullanıcı Menü Butonları
     if data == "tc":
         await query.message.reply_text("🆔 **TC Sorgu için:**\n`/tc [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
     elif data == "adsoyad":
@@ -92,9 +93,61 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("☎️ **TC -> GSM için:**\n`/tcgsm [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
     elif data == "isyeri":
         await query.message.reply_text("🏢 **İşyeri Sorgu için:**\n`/isyeri [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+    
+    # ADMIN PANEL BUTONLARI
+    elif data == "admin_users":
+        if update.effective_user.id != ADMIN_ID:
+            return
+        if not USERS_DB:
+            await query.message.reply_text("Henüz kayıtlı kullanıcı yok kanka.")
+            return
+        text = "👥 **Botu Kullananlar:**\n\n"
+        for uid, uname, ufirst in USERS_DB:
+            status = "⛔️ Banlı" if uid in BANNED_USERS else "✅ Aktif"
+            text += f"• ID: `{uid}` | @{uname} | {ufirst} | {status}\n"
+        await query.message.reply_text(text[:4000], parse_mode="Markdown")
+        
+    elif data == "admin_ban":
+        if update.effective_user.id != ADMIN_ID:
+            return
+        await query.message.reply_text("⛔️ **Ban Yönetimi:**\nKullanıcıyı banlamak için:\n`/ban [Kullanici_ID]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+        
+    elif data == "admin_duyuru":
+        if update.effective_user.id != ADMIN_ID:
+            return
+        await query.message.reply_text("📢 **Duyuru Yap:**\nToplu duyuru göndermek için:\n`/duyuru [Mesajın]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
 
-# --- GERÇEK API SORGULAMA FONKSİYONLARI ---
+    elif data == "admin_kanal":
+        if update.effective_user.id != ADMIN_ID:
+            return
+        await query.message.reply_text(f"📢 **Kanal Zorunluluğu:**\nŞu an aktif zorunlu kanal: `{CHANNEL}`\nKanaldan çıkanlar 6 saatte bir kontrol edilip otomatik uyarılıyor/banlanıyor kanka.")
 
+# PROFESYONEL BUTONLU /PANEL KOMUTU
+async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("Bu komutu kullanmaya yetkin yok kanka!")
+        return
+
+    total_users = len(USERS_DB)
+    total_banned = len(BANNED_USERS)
+    
+    keyboard = [
+        [InlineKeyboardButton("👥 Kullanıcıları Gör", callback_data="admin_users")],
+        [InlineKeyboardButton("📢 Kanal Zorunlulukları", callback_data="admin_kanal")],
+        [InlineKeyboardButton("⛔️ Ban Yönetimi", callback_data="admin_ban")],
+        [InlineKeyboardButton("🚀 Duyuru Yap", callback_data="admin_duyuru")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        f"🛠 **Yönetici Paneli**\n\n"
+        f"👥 **Toplam Aktif Üye:** {total_users}\n"
+        f"⛔️ **Banlanan Üye Sayısı:** {total_banned}\n\n"
+        f"Aşağıdaki yönetim butonlarını kullanabilirsin kanka:",
+        reply_markup=reply_markup
+    )
+
+# API SORGULAMA FONKSİYONLARI (.php Uzantılı)
 async def adsoyad_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if len(args) < 2:
@@ -106,12 +159,11 @@ async def adsoyad_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🔍 Sorgulanıyor, lütfen bekleyin...")
     
     try:
-        # API isteği (endpoint yapına göre burayı şekillendirebilirsin)
-        response = requests.get(f"{BASE_URL}/adsoyad?ad={name}&soyad={surname}", headers=HEADERS, timeout=10)
+        response = requests.get(f"{BASE_URL}/adsoyad.php?ad={name}&soyad={surname}", headers=HEADERS, timeout=10)
         data = response.json()
         await msg.edit_text(f"📊 **Sonuçlar:**\n```json\n{data}\n```", parse_mode="Markdown")
-    except Exception as e:
-        await msg.edit_text(f"❌ Sorgulama sırasında bir hata oluştu veya API yanıt vermedi.")
+    except Exception:
+        await msg.edit_text("❌ Sorgulama sırasında bir hata oluştu veya API yanıt vermedi.")
 
 async def tc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -122,14 +174,13 @@ async def tc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tc = args[0]
     msg = await update.message.reply_text("🔍 Sorgulanıyor...")
     try:
-        response = requests.get(f"{BASE_URL}/tc?tc={tc}", headers=HEADERS, timeout=10)
+        response = requests.get(f"{BASE_URL}/tc.php?tc={tc}", headers=HEADERS, timeout=10)
         data = response.json()
         await msg.edit_text(f"📊 **Sonuçlar:**\n```json\n{data}\n```", parse_mode="Markdown")
     except Exception:
         await msg.edit_text("❌ Sorgulama başarısız oldu.")
 
-# --- YÖNETİCİ VE KONTROL KOMUTLARI ---
-
+# PERİYODİK KANAL KONTROLÜ
 async def periodic_channel_check(app):
     with app.bot:
         for uid, uname, _ in list(USERS_DB):
@@ -141,49 +192,45 @@ async def periodic_channel_check(app):
                 count = LEFT_COUNTS[uid]
                 try:
                     if count == 1:
-                        await app.bot.send_message(chat_id=uid, text=f"⚠️ Dikkat! {CHANNEL} kanalımızdan çıktığınız tespit edildi.")
+                        await app.bot.send_message(chat_id=uid, text=f"⚠️ Dikkat! {CHANNEL} kanalımızdan çıktığınız tespit edildi. Tekrar katılın!")
                     elif count >= 2:
                         BANNED_USERS.add(uid)
                         await app.bot.send_message(chat_id=uid, text="⛔️ Kanaldan tekrar çıktığınız için banlandınız!")
                 except Exception:
                     pass
 
-async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    await update.message.reply_text(f"🛠 **Panel**\nAktif Üye: {len(USERS_DB)}\nBanlı: {len(BANNED_USERS)}")
-
-async def kullanicilar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    text = "👥 **Kullanıcılar:**\n"
-    for uid, uname, ufirst in USERS_DB:
-        text += f"• `{uid}` | @{uname}\n"
-    await update.message.reply_text(text[:4000], parse_mode="Markdown")
-
 async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     args = context.args
     if not args:
+        await update.message.reply_text("Kullanım: `/duyuru [Mesajın]` şeklinde yaz kanka.")
         return
-    text = " ".join(args)
+    announcement_text = " ".join(args)
+    success = 0
     for uid, _, _ in USERS_DB:
         if uid in BANNED_USERS:
             continue
         try:
-            await context.bot.send_message(chat_id=uid, text=text)
+            await context.bot.send_message(chat_id=uid, text=f"📢 **Duyuru:**\n\n{announcement_text}", parse_mode="Markdown")
+            success += 1
         except Exception:
             pass
-    await update.message.reply_text("✅ Duyuru bitti.")
+    await update.message.reply_text(f"✅ Duyuru başarıyla {success} kişiye gönderildi kanka.")
 
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     args = context.args
-    if args:
-        BANNED_USERS.add(int(args[0]))
-        await update.message.reply_text("✅ Banlandı.")
+    if not args:
+        await update.message.reply_text("Kullanım: `/ban [Kullanici_ID]` şeklinde yaz kanka.")
+        return
+    try:
+        target_id = int(args[0])
+        BANNED_USERS.add(target_id)
+        await update.message.reply_text(f"✅ `{target_id}` ID'li kullanıcı banlandı kanka.")
+    except ValueError:
+        await update.message.reply_text("Geçerli bir ID gir kanka.")
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -202,7 +249,6 @@ if __name__ == '__main__':
 
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("panel", panel_command))
-    app.add_handler(CommandHandler("kullanicilar", kullanicilar_command))
     app.add_handler(CommandHandler("duyuru", duyuru_command))
     app.add_handler(CommandHandler("ban", ban_command))
     app.add_handler(CommandHandler("adsoyad", adsoyad_command))
