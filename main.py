@@ -1,8 +1,10 @@
 import logging
 import requests
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 from apscheduler.schedulers.background import BackgroundScheduler
+from flask import Flask
 
 # Logging ayarları
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -13,14 +15,20 @@ ADMIN_ID = 6073294253
 CHANNEL = "@arastirduyuru"
 BASE_URL = 'http://arastir.vip/api'
 
-# Veritabanı simülasyonları
-USERS_DB = set() # (user_id, username, first_name)
-LEFT_COUNTS = {} # Kullanıcıların kanaldan kaç kez çıktığını takip etmek için
-BANNED_USERS = set() # Banlanan kullanıcılar
+USERS_DB = set()
+LEFT_COUNTS = {}
+BANNED_USERS = set()
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
+
+# Render'ın "Application exited early" hatasını engellemek için mini web sunucusu
+app_flask = Flask(__name__)
+
+@app_flask.route('/')
+def home():
+    return "Bot aktif ve çalışıyor!"
 
 async def check_channel_membership(bot, user_id):
     try:
@@ -61,10 +69,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
-# Butonlara tıklandığında çalışan kısım (Takılma sorununu çözen yer)
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer() # Butonun yükleniyor simgesini kapatır
+    await query.answer()
     
     data = query.data
     
@@ -87,7 +94,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "isyeri":
         await query.message.reply_text("🏢 **İşyeri Sorgu için kullanım:**\n`/isyeri [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
 
-# Periyodik Kontrol (6 Saatte Bir)
 async def periodic_channel_check(app):
     with app.bot:
         for uid, uname, _ in list(USERS_DB):
@@ -114,7 +120,6 @@ async def periodic_channel_check(app):
                 except Exception:
                     pass
 
-# Yönetici Paneli
 async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("Bu komutu kullanmaya yetkin yok kanka!")
@@ -132,7 +137,6 @@ async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• /ban [user_id] - Kullanıcıyı manuel banla"
     )
 
-# Kullanıcı Listesi
 async def kullanicilar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -151,7 +155,6 @@ async def kullanicilar_command(update: Update, context: ContextTypes.DEFAULT_TYP
     
     await update.message.reply_text(text, parse_mode="Markdown")
 
-# Toplu Duyuru
 async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -178,7 +181,6 @@ async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await status_msg.edit_text(f"✅ Duyuru tamamlandı!\n\nBaşarılı: {success}\nBaşarısız: {fail}")
 
-# Manuel Ban
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -195,7 +197,16 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("Geçerli bir ID girmelisin kanka.")
 
-def main():
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app_flask.run(host="0.0.0.0", port=port)
+
+if __name__ == '__main__':
+    from threading import Thread
+    # Web sunucusunu arka planda başlatıp Render'ın kapanmasını önlüyoruz
+    t = Thread(target=run_flask)
+    t.start()
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     scheduler = BackgroundScheduler()
@@ -207,12 +218,7 @@ def main():
     app.add_handler(CommandHandler("kullanicilar", kullanicilar_command))
     app.add_handler(CommandHandler("duyuru", duyuru_command))
     app.add_handler(CommandHandler("ban", ban_command))
-    
-    # Buton tıklamalarını yakalayan handler (Burada eklendi)
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    print("Bot ve buton yöneticisi aktif...")
+    print("Bot ve web sunucusu aktif...")
     app.run_polling()
-
-if __name__ == 'main__':
-    main()
