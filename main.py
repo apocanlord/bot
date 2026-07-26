@@ -1,7 +1,7 @@
 from flask import Flask
 import threading
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 ADMIN_ID = 6073294253
 
@@ -73,17 +73,29 @@ async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(panel_text, parse_mode="Markdown", reply_markup=reply_markup)
 
-# 4. Buton Tıklama Yönetimi (Callback Handler)
+# 4. Buton Tıklama Yönetimi ve Sorgu Ekranını Tetikleme
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer() # Butondaki yüklenme animasyonunu kapatır
+    await query.answer()
 
     data = query.data
 
     if data == "make_query":
-        await query.message.reply_text("🔍 Sorgu ekranı yakında aktif olacaktır.")
+        # Kullanıcı sorgu yap butonuna bastığında burası çalışacak
+        context.user_data['waiting_for_query'] = True
+        await query.message.reply_text(
+            "🔍 **Sorgu Ekranı**\n\n"
+            "Lütfen sorgulamak istediğiniz bilgiyi (TC, Ad Soyad, Telefon vb.) aşağıya yazın:"
+        , parse_mode="Markdown")
+    
     elif data == "my_profile":
-        await query.message.reply_text("👤 Profil bilgileriniz yükleniyor...")
+        user = update.effective_user
+        await query.message.reply_text(
+            f"👤 **Profil Bilgileriniz**\n\n"
+            f"🆔 ID: `{user.id}`\n"
+            f"İsim: {user.first_name}"
+        , parse_mode="Markdown")
+        
     elif data == "stop_bot":
         await query.message.reply_text("⏸️ Bot durdurma komutu alındı.")
     elif data == "toggle_channel":
@@ -101,7 +113,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "broadcast":
         await query.message.reply_text("📢 Duyuru göndermek için metni yazın.")
 
-# 5. Ana Çalıştırma Bloğu
+# 5. Kullanıcının Yazdığı Sorgu Metnini Yakalama ve İşleme
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Eğer kullanıcı "Sorgu Yap" butonuna basmışsa ve metin bekliyorsak
+    if context.user_data.get('waiting_for_query'):
+        query_text = update.message.text
+        
+        # Bekleme durumunu sıfırlıyoruz
+        context.user_data['waiting_for_query'] = False
+        
+        # Burada kullanıcının girdiği sorgu verisiyle arama yaptırabilirsin
+        await update.message.reply_text(
+            f"🔍 **Sorgulanan Veri:** `{query_text}`\n\n"
+            "⏳ Veritabanında aranıyor, lütfen bekleyin...",
+            parse_mode="Markdown"
+        )
+        
+        # Örnek sonuç simülasyonu (Kendi API veya DB bağlayacağın yer burasıdır)
+        # ---------------------------------------------------------
+        # sonuç = api_sorgula(query_text)
+        # ---------------------------------------------------------
+
+    else:
+        # Normal sohbet mesajları için genel yanıt
+        await update.message.reply_text("Komutlar için /start yazabilirsin.")
+
+# 6. Ana Çalıştırma Bloğu
 if __name__ == '__main__':
     keep_alive()
     
@@ -112,5 +149,6 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("panel", panel_command))
     application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     application.run_polling()
