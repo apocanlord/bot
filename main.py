@@ -19,19 +19,25 @@ def keep_alive():
     t = threading.Thread(target=run_flask)
     t.start()
 
-# 2. Start Komutu (Ana Sorgu Menüsü ve Kategoriler)
+# 2. Start Komutu (Görseldeki Tam Liste Alt Alta Menü)
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     menu_text = (
         "🔍 **@arastirxbot** Araştırma ve Sorgu Paneline Hoş Geldiniz!\n\n"
-        "Lütfen yapmak istediğiniz sorgu türünü aşağıdaki menüden seçin:"
+        "İşlem yapmak için aşağıdaki menüden bir kategori seçin:"
     )
     
-    # Kullanıcının göreceği ana sorgu menüsü butonları
+    # Ekran görüntündeki butonların birebir aynısı (alt alta)
     keyboard = [
-        [InlineKeyboardButton("🪪 TC Sorgu", callback_data="query_tc"), InlineKeyboardButton("📱 Telefon Sorgu", callback_data="query_phone")],
-        [InlineKeyboardButton("👤 Ad Soyad Sorgu", callback_data="query_name"), InlineKeyboardButton("🚗 Plaka Sorgu", callback_data="query_plate")],
-        [InlineKeyboardButton("📋 Diğer Araçlar / Sorgular", callback_data="query_other")],
-        [InlineKeyboardButton("👤 Profilim", callback_data="my_profile")]
+        [InlineKeyboardButton("🏠 Anasayfa", callback_data="menu_home")],
+        [InlineKeyboardButton("🤵 Ad Soyad Sorgula", callback_data="query_adsoyad")],
+        [InlineKeyboardButton("🖨️ TC Sorgula", callback_data="query_tc")],
+        [InlineKeyboardButton("🏢 İşyeri Sorgula", callback_data="query_isyeri")],
+        [InlineKeyboardButton("📍 Adres Sorgula", callback_data="query_adres")],
+        [InlineKeyboardButton("👥 Aile Sorgula", callback_data="query_aile")],
+        [InlineKeyboardButton("👥 Sülale Sorgula", callback_data="query_sulale")],
+        [InlineKeyboardButton("👶 Çocuk Sorgula", callback_data="query_cocuk")],
+        [InlineKeyboardButton("📱 TC-GSM Sorgula", callback_data="query_tcgsm")],
+        [InlineKeyboardButton("📱 GSM-TC Sorgula", callback_data="query_gsmtc")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -83,36 +89,33 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
 
-    if data.startswith("query_"):
-        query_type = data.split("_")[1]
+    if data == "menu_home":
+        await query.message.reply_text("🏠 Anasayfadasınız. İşlem için menüyü kullanabilirsiniz.")
+    elif data.startswith("query_"):
+        q_type = data.split("_")[1]
         context.user_data['waiting_for_query'] = True
-        context.user_data['current_query_type'] = query_type
+        context.user_data['current_query_type'] = q_type
         
-        type_names = {
-            "tc": "TC Kimlik Numarası",
-            "phone": "Telefon Numarası",
-            "name": "Ad Soyad",
-            "plate": "Araç Plakası",
-            "other": "Sorgu Bilgisi"
+        titles = {
+            "adsoyad": "Ad Soyad",
+            "tc": "TC Kimlik",
+            "isyeri": "İşyeri",
+            "adres": "Adres",
+            "aile": "Aile",
+            "sulale": "Sülale",
+            "cocuk": "Çocuk",
+            "tcgsm": "TC - GSM",
+            "gsmtc": "GSM - TC"
         }
         
-        selected_name = type_names.get(query_type, "Bilgi")
+        s_name = titles.get(q_type, "Sorgu")
         
         await query.message.reply_text(
-            f"🔍 **{selected_name} Ekranı**\n\n"
-            f"Lütfen aratmak istediğiniz {selected_name.lower()} bilgisini mesaj olarak gönderin:",
+            f"🔍 **{s_name} Ekranı**\n\n"
+            f"Lütfen aratmak istediğiniz {s_name.lower()} bilgisini mesaj olarak gönderin:",
             parse_mode="Markdown"
         )
     
-    elif data == "my_profile":
-        user = update.effective_user
-        await query.message.reply_text(
-            f"👤 **Profil Bilgileriniz**\n\n"
-            f"🆔 ID: `{user.id}`\n"
-            f"İsim: {user.first_name}",
-            parse_mode="Markdown"
-        )
-        
     elif data == "stop_bot":
         await query.message.reply_text("⏸️ Bot durdurma komutu alındı.")
     elif data == "toggle_channel":
@@ -130,22 +133,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "broadcast":
         await query.message.reply_text("📢 Duyuru göndermek için metni yazın.")
 
-# 5. Kullanıcının Girdiği Sorgu Verisini Yakalama
+# 5. Kullanıcının Girdiği Veriyi Yakalama
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('waiting_for_query'):
         query_text = update.message.text
-        q_type = context.user_data.get('current_query_type', 'sorgu')
+        q_type = context.user_data.get('current_query_type', 'islem')
         
         context.user_data['waiting_for_query'] = False
         
         await update.message.reply_text(
-            f"🔍 **Seçilen Tür:** `{q_type.upper()}`\n"
-            f"📌 **Girilen Değer:** `{query_text}`\n\n"
+            f"🔍 **Sorgu Türü:** `{q_type.upper()}`\n"
+            f"📌 **Girilen Veri:** `{query_text}`\n\n"
             "⏳ Veritabanında taranıyor, lütfen bekleyin...",
             parse_mode="Markdown"
         )
     else:
-        await update.message.reply_text("Ana menüyü açmak için /start yazabilirsin.")
+        await update.message.reply_text("Menüyü açmak için /start yazabilirsin.")
 
 # 6. Ana Çalıştırma Bloğu
 if __name__ == '__main__':
