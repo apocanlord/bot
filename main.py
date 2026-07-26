@@ -23,7 +23,6 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 
-# Render'ın "Application exited early" hatasını engellemek için mini web sunucusu
 app_flask = Flask(__name__)
 
 @app_flask.route('/')
@@ -76,126 +75,115 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     
     if data == "tc":
-        await query.message.reply_text("🆔 **TC Sorgu için kullanım:**\n`/tc [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+        await query.message.reply_text("🆔 **TC Sorgu için:**\n`/tc [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
     elif data == "adsoyad":
-        await query.message.reply_text("👤 **Ad Soyad Sorgu için kullanım:**\n`/adsoyad [Ad] [Soyad]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+        await query.message.reply_text("👤 **Ad Soyad Sorgu için:**\n`/adsoyad [Ad] [Soyad]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
     elif data == "aile":
-        await query.message.reply_text("👥 **Aile Sorgu için kullanım:**\n`/aile [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+        await query.message.reply_text("👥 **Aile Sorgu için:**\n`/aile [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
     elif data == "sulale":
-        await query.message.reply_text("🌳 **Sülale Sorgu için kullanım:**\n`/sulale [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+        await query.message.reply_text("🌳 **Sülale Sorgu için:**\n`/sulale [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
     elif data == "cocuklar":
-        await query.message.reply_text("👶 **Çocuklar Sorgu için kullanım:**\n`/cocuklar [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+        await query.message.reply_text("👶 **Çocuklar Sorgu için:**\n`/cocuklar [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
     elif data == "adres":
-        await query.message.reply_text("🏠 **Adres Sorgu için kullanım:**\n`/adres [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+        await query.message.reply_text("🏠 **Adres Sorgu için:**\n`/adres [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
     elif data == "gsm_tc":
-        await query.message.reply_text("📱 **GSM -> TC için kullanım:**\n`/gsmtc [Telefon]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+        await query.message.reply_text("📱 **GSM -> TC için:**\n`/gsmtc [Telefon]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
     elif data == "tc_gsm":
-        await query.message.reply_text("☎️ **TC -> GSM için kullanım:**\n`/tcgsm [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+        await query.message.reply_text("☎️ **TC -> GSM için:**\n`/tcgsm [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
     elif data == "isyeri":
-        await query.message.reply_text("🏢 **İşyeri Sorgu için kullanım:**\n`/isyeri [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+        await query.message.reply_text("🏢 **İşyeri Sorgu için:**\n`/isyeri [TCno]` şeklinde yazmalısın kanka.", parse_mode="Markdown")
+
+# --- GERÇEK API SORGULAMA FONKSİYONLARI ---
+
+async def adsoyad_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text("Kullanım: `/adsoyad [Ad] [Soyad]` şeklinde yaz kanka.")
+        return
+    
+    name = args[0]
+    surname = " ".join(args[1:])
+    msg = await update.message.reply_text("🔍 Sorgulanıyor, lütfen bekleyin...")
+    
+    try:
+        # API isteği (endpoint yapına göre burayı şekillendirebilirsin)
+        response = requests.get(f"{BASE_URL}/adsoyad?ad={name}&soyad={surname}", headers=HEADERS, timeout=10)
+        data = response.json()
+        await msg.edit_text(f"📊 **Sonuçlar:**\n```json\n{data}\n```", parse_mode="Markdown")
+    except Exception as e:
+        await msg.edit_text(f"❌ Sorgulama sırasında bir hata oluştu veya API yanıt vermedi.")
+
+async def tc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if not args:
+        await update.message.reply_text("Kullanım: `/tc [TCno]` şeklinde yaz kanka.")
+        return
+    
+    tc = args[0]
+    msg = await update.message.reply_text("🔍 Sorgulanıyor...")
+    try:
+        response = requests.get(f"{BASE_URL}/tc?tc={tc}", headers=HEADERS, timeout=10)
+        data = response.json()
+        await msg.edit_text(f"📊 **Sonuçlar:**\n```json\n{data}\n```", parse_mode="Markdown")
+    except Exception:
+        await msg.edit_text("❌ Sorgulama başarısız oldu.")
+
+# --- YÖNETİCİ VE KONTROL KOMUTLARI ---
 
 async def periodic_channel_check(app):
     with app.bot:
         for uid, uname, _ in list(USERS_DB):
             if uid in BANNED_USERS:
                 continue
-            
             is_in = await check_channel_membership(app.bot, uid)
             if not is_in:
                 LEFT_COUNTS[uid] = LEFT_COUNTS.get(uid, 0) + 1
                 count = LEFT_COUNTS[uid]
-                
                 try:
                     if count == 1:
-                        await app.bot.send_message(
-                            chat_id=uid,
-                            text=f"⚠️ Dikkat! {CHANNEL} kanalımızdan çıktığınız tespit edildi. Botu kullanmaya devam edebilmek için lütfen tekrar kanalımıza katılın. Tekrarı halinde banlanacaksınız!"
-                        )
+                        await app.bot.send_message(chat_id=uid, text=f"⚠️ Dikkat! {CHANNEL} kanalımızdan çıktığınız tespit edildi.")
                     elif count >= 2:
                         BANNED_USERS.add(uid)
-                        await app.bot.send_message(
-                            chat_id=uid,
-                            text="⛔️ Kanaldan tekrar çıktığınız için sistem tarafından kalıcı olarak banlandınız!"
-                        )
+                        await app.bot.send_message(chat_id=uid, text="⛔️ Kanaldan tekrar çıktığınız için banlandınız!")
                 except Exception:
                     pass
 
 async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("Bu komutu kullanmaya yetkin yok kanka!")
         return
-
-    total_users = len(USERS_DB)
-    total_banned = len(BANNED_USERS)
-    await update.message.reply_text(
-        f"🛠 **Yönetici Paneli**\n\n"
-        f"👥 **Toplam Aktif Üye:** {total_users}\n"
-        f"⛔️ **Banlanan Üye Sayısı:** {total_banned}\n\n"
-        f"Komutlar:\n"
-        f"• /kullanicilar - Tüm kullanıcıları listele\n"
-        f"• /duyuru [mesaj] - Toplu duyuru gönder\n"
-        f"• /ban [user_id] - Kullanıcıyı manuel banla"
-    )
+    await update.message.reply_text(f"🛠 **Panel**\nAktif Üye: {len(USERS_DB)}\nBanlı: {len(BANNED_USERS)}")
 
 async def kullanicilar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
-    
-    if not USERS_DB:
-        await update.message.reply_text("Henüz kayıtlı kullanıcı yok.")
-        return
-
-    text = "👥 **Botu Kullananlar:**\n\n"
+    text = "👥 **Kullanıcılar:**\n"
     for uid, uname, ufirst in USERS_DB:
-        status = "⛔️ Banlı" if uid in BANNED_USERS else "✅ Aktif"
-        text += f"• ID: `{uid}` | @{uname} | {ufirst} | {status}\n"
-    
-    if len(text) > 4096:
-        text = text[:4000] + "\n...ve diğerleri."
-    
-    await update.message.reply_text(text, parse_mode="Markdown")
+        text += f"• `{uid}` | @{uname}\n"
+    await update.message.reply_text(text[:4000], parse_mode="Markdown")
 
 async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
-    
     args = context.args
     if not args:
-        await update.message.reply_text("Kullanım: `/duyuru Göndermek istediğin mesaj` şeklinde yaz kanka.", parse_mode="Markdown")
         return
-    
-    announcement_text = " ".join(args)
-    success = 0
-    fail = 0
-
-    status_msg = await update.message.reply_text("🚀 Duyuru gönderilmeye başlandı...")
-
+    text = " ".join(args)
     for uid, _, _ in USERS_DB:
         if uid in BANNED_USERS:
             continue
         try:
-            await context.bot.send_message(chat_id=uid, text=f"📢 **Duyuru:**\n\n{announcement_text}", parse_mode="Markdown")
-            success += 1
+            await context.bot.send_message(chat_id=uid, text=text)
         except Exception:
-            fail += 1
-
-    await status_msg.edit_text(f"✅ Duyuru tamamlandı!\n\nBaşarılı: {success}\nBaşarısız: {fail}")
+            pass
+    await update.message.reply_text("✅ Duyuru bitti.")
 
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
-    
     args = context.args
-    if not args:
-        await update.message.reply_text("Kullanım: `/ban [kullanici_id]` şeklinde yaz kanka.", parse_mode="Markdown")
-        return
-    
-    try:
-        target_id = int(args[0])
-        BANNED_USERS.add(target_id)
-        await update.message.reply_text(f"✅ `{target_id}` ID'li kullanıcı başarıyla banlandı.")
-    except ValueError:
-        await update.message.reply_text("Geçerli bir ID girmelisin kanka.")
+    if args:
+        BANNED_USERS.add(int(args[0]))
+        await update.message.reply_text("✅ Banlandı.")
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -203,7 +191,6 @@ def run_flask():
 
 if __name__ == '__main__':
     from threading import Thread
-    # Web sunucusunu arka planda başlatıp Render'ın kapanmasını önlüyoruz
     t = Thread(target=run_flask)
     t.start()
 
@@ -218,7 +205,8 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("kullanicilar", kullanicilar_command))
     app.add_handler(CommandHandler("duyuru", duyuru_command))
     app.add_handler(CommandHandler("ban", ban_command))
+    app.add_handler(CommandHandler("adsoyad", adsoyad_command))
+    app.add_handler(CommandHandler("tc", tc_command))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    print("Bot ve web sunucusu aktif...")
     app.run_polling()
