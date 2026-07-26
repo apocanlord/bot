@@ -105,7 +105,7 @@ async def check_channel_subscription(user_id, context: ContextTypes.DEFAULT_TYPE
     uid_str = str(user_id)
     user_info = db["users"].get(uid_str, {"is_banned": False})
 
-    # Eğer admin banladıysa engelle
+    # Eğer banlıysa engelle
     if user_info.get("is_banned"):
         return False, ["BANNED"]
 
@@ -120,7 +120,6 @@ async def check_channel_subscription(user_id, context: ContextTypes.DEFAULT_TYPE
             if member.status in ['left', 'kicked']:
                 missing_channels.append(channel)
         except Exception:
-            # Bot kanalda admin değilse veya hata olursa kullanıcıyı banlama/engelleme
             pass
 
     if missing_channels:
@@ -203,10 +202,31 @@ def build_admin_panel():
         [InlineKeyboardButton(f"Kanal Zorunluluğu: {must_join_status}", callback_data="toggle_channel_req")],
         [InlineKeyboardButton("➕ Kanal Ekle", callback_data="btn_add_channel"), InlineKeyboardButton("➖ Kanal Sil", callback_data="btn_del_channel")],
         [InlineKeyboardButton("📢 Duyuru Gönder", callback_data="btn_broadcast"), InlineKeyboardButton("🛑 Duyuru İptal", callback_data="btn_cancel_broadcast")],
-        [InlineKeyboardButton("👥 Kullanıcı Listesi", callback_data="admin_users"), InlineKeyboardButton("🔓 Ban Kaldır (Unban)", callback_data="btn_unban")],
+        [InlineKeyboardButton("👥 Kullanıcı Listesi", callback_data="admin_users")],
+        [InlineKeyboardButton("⛔ Kullanıcı Banla", callback_data="btn_ban"), InlineKeyboardButton("🔓 Banlı Listesi / Ban Kaldır", callback_data="btn_banned_list")],
         [InlineKeyboardButton("🔄 Paneli Yenile", callback_data="admin_refresh")]
     ]
     return panel_text, InlineKeyboardMarkup(keyboard)
+
+def build_banned_users_menu():
+    banned_list = [uid for uid, data in db["users"].items() if data.get("is_banned")]
+    
+    if not banned_list:
+        text = "🚫 <b>Banlı Kullanıcı Bulunmamaktadır.</b>\n\nSistemde aktif olarak engellenmiş hiç kimse yok."
+        keyboard = [[InlineKeyboardButton("⬅️ Panele Geri Dön", callback_data="admin_back")]]
+        return text, InlineKeyboardMarkup(keyboard)
+
+    text = f"🚫 <b>Banlı Kullanıcı Listesi ({len(banned_list)} Kullanıcı):</b>\n\nAşağıdaki listeden banını kaldırmak istediğiniz kullanıcının butonuna basabilirsiniz:"
+    keyboard = []
+    
+    for uid in banned_list[:40]:  # Telegram buton limiti için ilk 40 kullanıcı
+        u_data = db["users"][uid]
+        uname = u_data.get("username")
+        label = f"🔓 @{uname} ({uid})" if uname else f"🔓 ID: {uid}"
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"unban_id_{uid}")])
+
+    keyboard.append([InlineKeyboardButton("⬅️ Panele Geri Dön", callback_data="admin_back")])
+    return text, InlineKeyboardMarkup(keyboard)
 
 async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     register_user(update.effective_user)
@@ -277,6 +297,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(text=msg, parse_mode="HTML", reply_markup=keyboard)
             return
 
+        elif data == "btn_banned_list":
+            await query.answer()
+            text, keyboard = build_banned_users_menu()
+            await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
+            return
+
+        elif data.startswith("unban_id_"):
+            target_uid = data.replace("unban_id_", "")
+            if target_uid in db["users"]:
+                db["users"][target_uid]["is_banned"] = False
+                save_data(db)
+                await query.answer("✅ Ban kaldırıldı!", show_alert=True)
+            else:
+                await query.answer("⚠️ Kullanıcı veritabanında bulunamadı.", show_alert=True)
+            
+            text, keyboard = build_banned_users_menu()
+            await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
+            return
+
+        elif data == "btn_ban":
+            await query.answer()
+            context.user_data['admin_action'] = 'ban_user'
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ İptal / Geri Dön", callback_data="admin_back")]])
+            await query.edit_message_text("⛔ <b>Kullanıcı Banlama Modu</b>\n\nBanlamak istediğiniz kullanıcının Telegram ID'sini yazıp gönderin:\n<i>(Örn: 6073294253)</i>", parse_mode="HTML", reply_markup=keyboard)
+            return
+
         elif data == "btn_add_channel":
             await query.answer()
             context.user_data['admin_action'] = 'add_channel'
@@ -289,13 +335,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['admin_action'] = 'del_channel'
             keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ İptal / Geri Dön", callback_data="admin_back")]])
             await query.edit_message_text("➖ <b>Kanal Silme Modu</b>\n\nSilmek istediğiniz kanal kullanıcı adını yazıp gönderin:\n<i>(Örn: @arastirzorunlu)</i>", parse_mode="HTML", reply_markup=keyboard)
-            return
-
-        elif data == "btn_unban":
-            await query.answer()
-            context.user_data['admin_action'] = 'unban_user'
-            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ İptal / Geri Dön", callback_data="admin_back")]])
-            await query.edit_message_text("🔓 <b>Ban Kaldırma Modu</b>\n\nBanını açmak istediğiniz kullanıcının Telegram ID'sini yazıp gönderin:", parse_mode="HTML", reply_markup=keyboard)
             return
 
         elif data == "btn_broadcast":
@@ -404,7 +443,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         action = context.user_data.get('admin_action')
         context.user_data['admin_action'] = None
 
-        if action == 'add_channel':
+        if action == 'ban_user':
+            if text_input in db["users"]:
+                db["users"][text_input]["is_banned"] = True
+                save_data(db)
+                await update.message.reply_text(f"⛔ <code>{text_input}</code> ID'li kullanıcı başarıyla banlandı.", parse_mode="HTML")
+            else:
+                # Kullanıcı henüz veritabanında yoksa bile banlı olarak ekle
+                db["users"][text_input] = {
+                    "is_banned": True,
+                    "created_at": date.today().isoformat(),
+                    "username": None
+                }
+                save_data(db)
+                await update.message.reply_text(f"⛔ <code>{text_input}</code> ID'li kullanıcı veritabanına eklenerek banlandı.", parse_mode="HTML")
+            return
+
+        elif action == 'add_channel':
             ch_name = text_input if text_input.startswith("@") else "@" + text_input
             if ch_name not in db["channels"]:
                 db["channels"].append(ch_name)
@@ -422,15 +477,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"🗑️ <b>{ch_name}</b> listeden çıkarıldı.", parse_mode="HTML")
             else:
                 await update.message.reply_text("⚠️ Kanal listede bulunamadı.")
-            return
-
-        elif action == 'unban_user':
-            if text_input in db["users"]:
-                db["users"][text_input]["is_banned"] = False
-                save_data(db)
-                await update.message.reply_text(f"✅ <code>{text_input}</code> ID'li kullanıcının banı kaldırıldı.", parse_mode="HTML")
-            else:
-                await update.message.reply_text("⚠️ Kullanıcı veritabanında bulunamadı.")
             return
 
         elif action == 'broadcast_msg':
