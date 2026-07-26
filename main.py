@@ -15,7 +15,7 @@ LOG_CHANNEL_ID = -1004400643128
 TOKEN = "8646358320:AAEj6rlEpCxX1aLOXspgbsTNpVaYtvvGrbE"
 VIP_CONTACT = "@danistay"
 
-# --- VERİTABANI YÖNETİMİ ---
+# --- VERİTABANI YÖNETİMİ (SIFIRLANMAYA KARŞI KORUMALI) ---
 DATA_FILE = "bot_data.json"
 DEFAULT_CHANNELS = ["@arastirduyuru", "@arastirzorunlu"]
 
@@ -30,12 +30,17 @@ def load_data():
         try:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 saved_data = json.load(f)
-                if "users" in saved_data: data["users"].update(saved_data["users"])
-                if "channels" in saved_data: data["channels"] = list(set(saved_data["channels"] + DEFAULT_CHANNELS))
-                if "must_join" in saved_data: data["must_join"] = saved_data["must_join"]
-                if "maintenance_mode" in saved_data: data["maintenance_mode"] = saved_data["maintenance_mode"]
-        except Exception:
-            pass
+                if isinstance(saved_data, dict):
+                    if "users" in saved_data and isinstance(saved_data["users"], dict):
+                        data["users"].update(saved_data["users"])
+                    if "channels" in saved_data and isinstance(saved_data["channels"], list):
+                        data["channels"] = list(set(saved_data["channels"] + DEFAULT_CHANNELS))
+                    if "must_join" in saved_data:
+                        data["must_join"] = saved_data["must_join"]
+                    if "maintenance_mode" in saved_data:
+                        data["maintenance_mode"] = saved_data["maintenance_mode"]
+        except Exception as e:
+            print(f"Veri okuma hatasi: {e}")
     return data
 
 def save_data(data):
@@ -46,7 +51,6 @@ def save_data(data):
         print(f"Veri kaydetme hatası: {e}")
 
 db = load_data()
-duyuru_iptal_flag = False
 
 # --- WEB SUNUCUSU (RENDER) ---
 app = Flask('')
@@ -140,6 +144,7 @@ async def register_user(user, referrer_id=None, context: ContextTypes.DEFAULT_TY
             )
             await send_log(context, log_msg)
     else:
+        # Mevcut verileri sıfırlamadan sadece kullanıcı bilgilerini güncelle
         db["users"][uid_str]["username"] = username
         db["users"][uid_str]["first_name"] = first_name
         save_data(db)
@@ -147,12 +152,6 @@ async def register_user(user, referrer_id=None, context: ContextTypes.DEFAULT_TY
     check_and_reset_daily_limit(uid_str)
 
 async def check_channel_subscription(user_id, context: ContextTypes.DEFAULT_TYPE):
-    uid_str = str(user_id)
-    user_info = db["users"].get(uid_str, {"is_banned": False})
-
-    if user_info.get("is_banned"):
-        return False, ["BANNED"]
-
     if not db["must_join"] or not db["channels"]:
         return True, []
 
@@ -266,13 +265,13 @@ def build_admin_panel():
         [InlineKeyboardButton(f"Bakım Modu: {maint_status}", callback_data="toggle_maintenance"), InlineKeyboardButton(f"Kanal Şartı: {must_join_status}", callback_data="toggle_channel_req")],
         [InlineKeyboardButton("➕ Kanal Ekle", callback_data="btn_add_channel"), InlineKeyboardButton("➖ Kanal Sil", callback_data="btn_del_channel")],
         [InlineKeyboardButton("📢 Duyuru Gönder", callback_data="btn_broadcast"), InlineKeyboardButton("👥 Kullanıcı Listesi", callback_data="admin_users")],
-        [InlineKeyboardButton("⛔ Banla / Ban Kaldır", callback_data="btn_ban")]
+        [InlineKeyboardButton("⛔ Banla / Ban Kaldır", callback_data="btn_ban")],
+        [InlineKeyboardButton("🔄 Paneli Yenile", callback_data="refresh_admin")]
     ]
     return panel_text, InlineKeyboardMarkup(keyboard)
 
 # --- START & PANEL ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Kullanıcının attığı /start mesajını sil
     asyncio.create_task(delete_message_safe(update.message))
 
     referrer_id = None
@@ -380,9 +379,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
         return
 
-    # Admin Butonları
+    # ADMIN BUTONLARI
     if user_id == ADMIN_ID:
-        if data == "btn_add_vip":
+        if data == "refresh_admin":
+            await query.answer("🔄 Panel yenilendi!")
+            text, keyboard = build_admin_panel()
+            await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
+            return
+
+        elif data == "btn_add_vip":
             await query.answer()
             context.user_data['admin_action'] = 'add_vip'
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ İptal", callback_data="admin_back")]])
@@ -419,7 +424,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(text=text, parse_mode="HTML", reply_markup=keyboard)
             return
 
-    # Sorgu Seçimleri
+    # SORGU SEÇİMLERİ
     if data.startswith("query_"):
         q_type = data.split("_")[1]
         
@@ -489,7 +494,7 @@ def generate_html_file(q_type, data):
 
 # --- MESAJ İŞLEME VE TEMİZLEME ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # KULLANICININ ATTIĞI MESAJI ANINDA SİL (Sohbet temiz kalır)
+    # Kullanıcının yazdığı mesajı otomatik sil
     asyncio.create_task(delete_message_safe(update.message))
 
     await register_user(update.effective_user, context=context)
@@ -534,7 +539,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         is_vip = u_data.get("is_vip", False) or (user_id == ADMIN_ID)
         daily_count = u_data.get("daily_queries", 0)
 
-        # Lütfen bekleyin yazısını mevcut menü mesajına yazıyoruz
         if menu_msg_id:
             try:
                 await context.bot.edit_message_text(chat_id=user_id, message_id=menu_msg_id, text="⏳ <b>Sorgulanıyor, lütfen bekleyin...</b>", parse_mode="HTML")
