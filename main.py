@@ -29,7 +29,7 @@ def load_data():
         except Exception:
             pass
     return {
-        "users": {},        # "user_id": {"warnings": 0, "is_banned": False, "created_at": "YYYY-MM-DD"}
+        "users": {},        # "user_id": {"warnings": 0, "is_banned": False, "created_at": "YYYY-MM-DD", "username": "kullanici_adi"}
         "channels": [],     # ["@kanal1", "@kanal2"]
         "must_join": True   # Kanal zorunluluğu
     }
@@ -57,20 +57,36 @@ def keep_alive():
     t.start()
 
 # --- YARDIMCI FONKSİYONLAR ---
-def register_user(user_id):
+def register_user(user):
+    """Kullanıcıyı ve username/tarih bilgilerini eksiksiz kaydeder, eski verileri bozmaz."""
+    if not user:
+        return
+    
+    user_id = user.id
+    username = user.username if user.username else None
     uid_str = str(user_id)
     today_str = date.today().isoformat()
+
     if uid_str not in db["users"]:
         db["users"][uid_str] = {
             "warnings": 0, 
             "is_banned": False,
-            "created_at": today_str
+            "created_at": today_str,
+            "username": username
         }
         save_data(db)
-    elif "created_at" not in db["users"][uid_str]:
-        # Eski veri varsa tarih alanını tamamla, veriyi koru
-        db["users"][uid_str]["created_at"] = today_str
-        save_data(db)
+    else:
+        # Var olan kullanıcı verilerini güncelle / koru
+        updated = False
+        if "created_at" not in db["users"][uid_str]:
+            db["users"][uid_str]["created_at"] = today_str
+            updated = True
+        if db["users"][uid_str].get("username") != username:
+            db["users"][uid_str]["username"] = username
+            updated = True
+            
+        if updated:
+            save_data(db)
 
 async def check_channel_subscription(user_id, context: ContextTypes.DEFAULT_TYPE):
     """Kullanıcının zorunlu kanallara üye olup olmadığını kontrol eder."""
@@ -79,7 +95,6 @@ async def check_channel_subscription(user_id, context: ContextTypes.DEFAULT_TYPE
 
     missing_channels = []
     uid_str = str(user_id)
-    register_user(user_id)
     user_info = db["users"].get(uid_str, {"warnings": 0, "is_banned": False})
 
     if user_info.get("is_banned"):
@@ -130,8 +145,8 @@ async def send_subscription_warning(chat_id, user_id, missing, context: ContextT
 
 # --- 2. START KOMUTU & ANA MENÜ ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    register_user(update.effective_user)
     user_id = update.effective_user.id
-    register_user(user_id)
 
     if db["users"].get(str(user_id), {}).get("is_banned"):
         await update.message.reply_text("⛔ <b>Sistemden Banlandınız!</b>\nZorunlu kanallardan 3 kez ayrıldığınız için bota erişiminiz engellenmiştir.", parse_mode="HTML")
@@ -167,8 +182,6 @@ def build_admin_panel():
     today_str = date.today().isoformat()
     total_users = len(db["users"])
     banned_users = sum(1 for u in db["users"].values() if u.get("is_banned"))
-    
-    # Bugün Katılan Kullanıcı Hesaplama
     today_users = sum(1 for u in db["users"].values() if u.get("created_at") == today_str)
 
     channels_str = "\n".join([f"• {c}" for c in db["channels"]]) if db["channels"] else "<i>Ekli kanal yok.</i>"
@@ -196,6 +209,7 @@ def build_admin_panel():
     return panel_text, InlineKeyboardMarkup(keyboard)
 
 async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    register_user(update.effective_user)
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Bu komutu kullanma yetkiniz yok.")
         return
@@ -203,9 +217,10 @@ async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text, keyboard = build_admin_panel()
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
 
-# --- 4. BUTON HANDLER (TÜM İŞLEMLER MESAJDAN AYRILMADAN EDİTLENİR) ---
+# --- 4. BUTON HANDLER ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    register_user(query.from_user)
     user_id = query.from_user.id
     data = query.data
 
@@ -220,7 +235,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_subscription_warning(query.message.chat_id, user_id, missing, context)
         return
 
-    # B) Yönetici Buton Modülü (Tamamen Butonlu)
+    # B) Yönetici Buton Modülü
     if user_id == ADMIN_ID:
         if data == "toggle_channel_req":
             db["must_join"] = not db["must_join"]
@@ -248,10 +263,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             u_list = list(db["users"].keys())
             total = len(u_list)
             msg = f"👥 <b>Toplam Kullanıcı Listesi ({total}):</b>\n━━━━━━━━━━━━━━━━━━\n"
+            
             for uid in u_list[:80]:
-                created = db["users"][uid].get("created_at", "Bilinmiyor")
-                is_b = " ⛔ (BANLI)" if db["users"][uid].get("is_banned") else ""
-                msg += f"• <code>{uid}</code> | 📅 {created}{is_b}\n"
+                u_data = db["users"][uid]
+                created = u_data.get("created_at", "Bilinmiyor")
+                uname = u_data.get("username")
+                uname_str = f"| @{uname}" if uname else "| <i>(Kullanıcı Adı Yok)</i>"
+                is_b = " ⛔ (BANLI)" if u_data.get("is_banned") else ""
+                
+                msg += f"• <code>{uid}</code> {uname_str} | 📅 {created}{is_b}\n"
+                
             if total > 80: msg += f"\n<i>...ve {total - 80} kişi daha.</i>"
             
             keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Panele Geri Dön", callback_data="admin_back")]])
@@ -380,14 +401,14 @@ def generate_html_file(q_type, data, count):
 
 # --- 5. MESAJ İŞLEME VE INTERAKTİF ADMIN İŞLEMLERİ ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    register_user(update.effective_user)
     user_id = update.effective_user.id
-    register_user(user_id)
     text_input = update.message.text.strip()
 
-    # Admin Buton İşlemleri (Yazı Yazarak Tetiklenen Butonlar)
+    # Admin Buton İşlemleri
     if user_id == ADMIN_ID and context.user_data.get('admin_action'):
         action = context.user_data.get('admin_action')
-        context.user_data['admin_action'] = None # Modu sıfırla
+        context.user_data['admin_action'] = None
 
         if action == 'add_channel':
             ch_name = text_input if text_input.startswith("@") else "@" + text_input
