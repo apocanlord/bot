@@ -6,7 +6,6 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 
 ADMIN_ID = 6073294253
 
-# 1. Render Port Ayarı İçin Web Sunucusu
 app = Flask('')
 
 @app.route('/')
@@ -20,7 +19,6 @@ def keep_alive():
     t = threading.Thread(target=run_flask)
     t.start()
 
-# 2. Start Komutu ve Tam Alt Alta Menü
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     menu_text = (
         "🔍 **@arastirxbot** Araştırma ve Sorgu Paneline Hoş Geldiniz!\n\n"
@@ -42,7 +40,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(menu_text, parse_mode="Markdown", reply_markup=reply_markup)
 
-# 3. Admin Panel Komutu
 async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Bu komutu kullanma yetkiniz yok.")
@@ -55,7 +52,6 @@ async def panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text(panel_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# 4. Kategori Seçim Yönetimi
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -69,24 +65,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['current_query_type'] = q_type
         
         titles = {
-            "adsoyad": "Ad Soyad (Örn: Ahmet Yılmaz)",
-            "tc": "TC Kimlik (11 Haneli)",
-            "isyeri": "İşyeri / Vergi No",
-            "adres": "Adres (TC Kimlik)",
-            "aile": "Aile (TC Kimlik)",
-            "sulale": "Sülale (TC Kimlik)",
-            "cocuk": "Çocuk (TC Kimlik)",
-            "tcgsm": "TC - GSM (TC Kimlik)",
-            "gsmtc": "GSM - TC (Örn: 5051234567)"
+            "adsoyad": "Ad Soyad", "tc": "TC Kimlik", "isyeri": "İşyeri",
+            "adres": "Adres", "aile": "Aile", "sulale": "Sülale",
+            "cocuk": "Çocuk", "tcgsm": "TC - GSM", "gsmtc": "GSM - TC"
         }
-        s_name = titles.get(q_type, "Sorgu Bilgisi")
+        s_name = titles.get(q_type, "Sorgu")
         
         await query.message.reply_text(
-            f"🔍 **{q_type.upper()} Sorgulama Ekranı**\n\nLütfen aratmak istediğiniz bilgiyi gönderin:\n👉 *{s_name}*",
+            f"🔍 **{s_name} Ekranı**\n\nLütfen aratmak istediğiniz bilgiyi mesaj olarak gönderin:",
             parse_mode="Markdown"
         )
 
-# 5. Gelen Mesajları ve API İsteklerini İşleme
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('waiting_for_query'):
         query_text = update.message.text.strip()
@@ -96,7 +85,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⏳ Sorgulanıyor, lütfen bekleyin...", parse_mode="Markdown")
         
         try:
-            # Her modülün kendi kullanım detayına göre endpoint ve parametre yapısı
             if q_type == "adsoyad":
                 parts = query_text.split(" ", 1)
                 ad = parts[0]
@@ -112,11 +100,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response = requests.get(api_url, timeout=15)
             
             if response.status_code == 200:
-                try:
-                    res_data = response.json()
-                except:
-                    await update.message.reply_text(f"❌ API geçersiz yanıt döndürdü: {response.text[:100]}")
-                    return
+                res_data = response.json()
                 
                 if isinstance(res_data, list) and len(res_data) > 0:
                     res_data = res_data[0]
