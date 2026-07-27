@@ -1,27 +1,40 @@
-async def api_istek_at(endpoint: str, params: dict):
-    url = f"http://arastir.vip/api/{endpoint}"
+import os
+import logging
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+# Logging ayarları
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+# Bot başlatma ve /start komutu
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_first_name = update.effective_user.first_name
+    await update.message.reply_text(f"Selam {user_first_name}! Bot sorunsuz ve aktif şekilde çalışıyor. 🔥")
+
+# /ping komutu
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Pong! 🏓 Sunucu bağlantısı canlı.")
+
+def main():
+    # Token'ı Environment Variable üzerinden alıyoruz
+    token = os.environ.get("BOT_TOKEN")
     
-    # Gerçek bir tarayıcı taklidi (Cloudflare / WAF engellerini aşmak için)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Connection": "keep-alive"
-    }
-    
-    try:
-        # SSL ve zaman aşımı yapılandırması
-        timeout = aiohttp.ClientTimeout(total=20)
-        connector = aiohttp.TCPConnector(ssl=False)
-        
-        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-            async with session.get(url, params=params, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return True, data
-                else:
-                    return False, f"API Hatası (HTTP {response.status})"
-    except aiohttp.ClientConnectorError:
-        return False, "Sunucuya bağlanılamadı. API IP engeli uyguluyor olabilir."
-    except Exception as e:
-        return False, f"Sunucu Bağlantı Hatası: {str(e)}"
+    if not token:
+        print("HATA: BOT_TOKEN bulunamadı! Lütfen Render Environment Variables kısmını kontrol et.")
+        return
+
+    # Telegram uygulamasını kur
+    app = ApplicationBuilder().token(token).build()
+
+    # Komut tanımlamaları
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("ping", ping))
+
+    print("Bot başarıyla başlatıldı ve dinlemeye geçti...")
+    app.run_polling()
+
+if __name__ == '__main__':
+    main()
