@@ -1,8 +1,9 @@
 import os
+import io
 import logging
 import requests
 from aiohttp import web
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -20,7 +21,136 @@ logging.basicConfig(
 
 BASE_URL = "http://arastir.vip/api"
 
-# Ana Menü Butonları
+# HTML Rapor Şablonu Oluşturucu (Dark / Premium VIP Theme)
+def generate_html_report(title, total_count, headers, rows):
+    headers_html = "".join([f"<th>{h}</th>" for h in headers])
+    rows_html = ""
+    for row in rows:
+        tds = "".join([f"<td>{cell}</td>" for cell in row])
+        rows_html += f"<tr>{tds}</tr>"
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title} - Rapor</title>
+    <style>
+        :root {{
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --accent-color: #38bdf8;
+            --text-color: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+            --hover-color: #1e293b;
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+        }}
+        .container {{
+            max-width: 1000px;
+            margin: 0 auto;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            padding: 24px;
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 24px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .header h1 {{
+            margin: 0;
+            font-size: 22px;
+            color: var(--accent-color);
+        }}
+        .badge {{
+            background: rgba(56, 189, 248, 0.1);
+            color: var(--accent-color);
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            border: 1px solid rgba(56, 189, 248, 0.2);
+        }}
+        .table-container {{
+            background-color: var(--card-bg);
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            overflow-x: auto;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 14px;
+        }}
+        th {{
+            background-color: rgba(51, 65, 85, 0.5);
+            color: var(--text-muted);
+            padding: 14px 18px;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border-color);
+        }}
+        td {{
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-color);
+        }}
+        tr:last-child td {{
+            border-bottom: none;
+        }}
+        tr:hover td {{
+            background-color: rgba(255, 255, 255, 0.02);
+        }}
+        .footer {{
+            text-align: center;
+            margin-top: 24px;
+            color: var(--text-muted);
+            font-size: 12px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>{title}</h1>
+                <p style="margin: 4px 0 0 0; color: var(--text-muted); font-size: 13px;">AraştırX VIP Analiz Sistemi</p>
+            </div>
+            <div class="badge">Toplam: {total_count} Kayıt</div>
+        </div>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>{headers_html}</tr>
+                </thead>
+                <tbody>
+                    {rows_html}
+                </tbody>
+            </table>
+        </div>
+        <div class="footer">
+            Generatör: AraştırX Telegram Bot | VIP Raporlama
+        </div>
+    </div>
+</body>
+</html>"""
+    return html_content
+
+
 def get_main_menu():
     keyboard = [
         [
@@ -48,14 +178,16 @@ def get_main_menu():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
+    bot_name = context.bot.first_name  # Botun Telegram'daki adı
+    
     text = (
         f"Selam {user_name}! 👋\n\n"
-        "Araştır API Botuna hoş geldin. Sorgulama yapmak istediğin işlemi aşağıdan seçebilirsin:"
+        f"**{bot_name}** sistemine hoş geldin. Sorgulama yapmak istediğin işlemi aşağıdan seçebilirsin:"
     )
     if update.message:
-        await update.message.reply_text(text, reply_markup=get_main_menu())
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=get_main_menu())
     elif update.callback_query:
-        await update.callback_query.message.edit_text(text, reply_markup=get_main_menu())
+        await update.callback_query.message.edit_text(text, parse_mode="Markdown", reply_markup=get_main_menu())
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -97,9 +229,53 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     input_text = update.message.text.strip()
     back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Ana Menüye Dön", callback_data="main_menu")]])
+    status_msg = await update.message.reply_text("⏳ Sorgulanıyor ve VIP Rapor hazırlanıyor...")
 
     try:
-        if action == "tc":
+        # --- AD SOYAD SORGU ---
+        if action == "adsoyad":
+            parts = input_text.split()
+            if len(parts) < 2:
+                await status_msg.edit_text("⚠️ En az Ad ve Soyad girmelisiniz! Örnek: `AHMET YILMAZ`", parse_mode="Markdown")
+                return
+
+            params = {"ad": parts[0], "soyad": parts[1]}
+            if len(parts) >= 3: params["il"] = parts[2]
+            if len(parts) >= 4: params["ilce"] = parts[3]
+
+            res = requests.get(f"{BASE_URL}/adsoyad.php", params=params).json()
+            
+            if res.get("success") and res.get("data"):
+                data_list = res["data"]
+                count = res.get("count", len(data_list))
+
+                # Eğer sonuç azsa (5 veya altı) normal mesaj at, çoksa VIP HTML Rapor yolla
+                if count <= 5:
+                    msg = f"🔍 **AD SOYAD SORGU (Toplam: {count})**\n\n"
+                    for item in data_list:
+                        msg += f"• `{item.get('TC')}` - {item.get('ADI')} {item.get('SOYADI')} ({item.get('DOGUMTARIHI')})\n"
+                    await status_msg.edit_text(msg, parse_mode="Markdown", reply_markup=back_btn)
+                else:
+                    headers = ["TC Kimlik No", "Adı", "Soyadı", "Doğum Tarihi"]
+                    rows = [[item.get('TC', ''), item.get('ADI', ''), item.get('SOYADI', ''), item.get('DOGUMTARIHI', '')] for item in data_list]
+                    
+                    html_code = generate_html_report(f"Ad Soyad Sorgu: {input_text.upper()}", count, headers, rows)
+                    
+                    file_bytes = io.BytesIO(html_code.encode("utf-8"))
+                    file_bytes.name = f"Sorgu_{input_text.replace(' ', '_')}.html"
+
+                    await status_msg.delete()
+                    await update.message.reply_document(
+                        document=InputFile(file_bytes),
+                        caption=f"📊 **Sorgu Tamamlandı!**\n\n🔍 **Arama:** `{input_text}`\n📈 **Toplam Sonuç:** `{count}` adet\n\n*Aşağıdaki HTML dosyasını tarayıcınızda açarak tüm sonuçları karanlık mod VIP panelde inceleyebilirsiniz.*",
+                        parse_mode="Markdown",
+                        reply_markup=back_btn
+                    )
+            else:
+                await status_msg.edit_text(f"❌ **Hata:** {res.get('error', 'Sonuç bulunamadı.')}", reply_markup=back_btn)
+
+        # --- TC SORGU ---
+        elif action == "tc":
             res = requests.get(f"{BASE_URL}/tc.php", params={"tc": input_text}).json()
             if res.get("success"):
                 d = res["data"]
@@ -115,74 +291,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             else:
                 msg = f"❌ **Hata:** {res.get('error', 'Kayıt bulunamadı.')}"
+            await status_msg.edit_text(msg, parse_mode="Markdown", reply_markup=back_btn)
 
-        elif action == "adsoyad":
-            parts = input_text.split()
-            if len(parts) < 2:
-                await update.message.reply_text("⚠️ En az Ad ve Soyad girmelisiniz! Örnek: `AHMET YILMAZ`")
-                return
-            
-            params = {"ad": parts[0], "soyad": parts[1]}
-            if len(parts) >= 3: params["il"] = parts[2]
-            if len(parts) >= 4: params["ilce"] = parts[3]
-
-            res = requests.get(f"{BASE_URL}/adsoyad.php", params=params).json()
-            if res.get("success") and res.get("data"):
-                msg = f"🔍 **AD SOYAD SORGU (Toplam: {res.get('count', 0)})**\n\n"
-                for item in res["data"][:10]: # İlk 10 sonucu göster
-                    msg += f"• `{item.get('TC')}` - {item.get('ADI')} {item.get('SOYADI')} ({item.get('DOGUMTARIHI')})\n"
-            else:
-                msg = f"❌ **Hata:** {res.get('error', 'Sonuç bulunamadı.')}"
-
-        elif action == "aile":
-            res = requests.get(f"{BASE_URL}/aile.php", params={"tc": input_text}).json()
-            if res.get("success"):
-                d = res["data"]
-                msg = "👨‍👩‍👧‍👦 **AİLE BİLGİLERİ**\n\n"
-                anne = d.get("anne", {})
-                baba = d.get("baba", {})
-                msg += f"👩 **Anne:** {anne.get('ADI')} {anne.get('SOYADI')} (`{anne.get('TC')}`)\n"
-                msg += f"👨 **Baba:** {baba.get('ADI')} {baba.get('SOYADI')} (`{baba.get('TC')}`)\n\n"
-                msg += "👧👦 **Kardeşler:**\n"
-                for k in d.get("kardesler", []):
-                    msg += f"• `{k.get('TC')}` - {k.get('ADI')} {k.get('SOYADI')}\n"
-            else:
-                msg = f"❌ **Hata:** {res.get('error', 'Kayıt bulunamadı.')}"
-
-        elif action == "sulale":
-            res = requests.get(f"{BASE_URL}/sulale.php", params={"tc": input_text}).json()
-            if res.get("success"):
-                d = res["data"]
-                msg = "🌳 **SÜLALE BİLGİLERİ**\n\n"
-                for k, v in d.items():
-                    if isinstance(v, dict):
-                        msg += f"• **{k.capitalize()}:** {v.get('ADI', '')} (`{v.get('TC', '')}`)\n"
-            else:
-                msg = f"❌ **Hata:** {res.get('error', 'Kayıt bulunamadı.')}"
-
-        elif action == "cocuk":
-            res = requests.get(f"{BASE_URL}/cocuk.php", params={"tc": input_text}).json()
-            if res.get("success") and res.get("data"):
-                msg = f"👶 **ÇOCUKLARI (Toplam: {res.get('count', 0)})**\n\n"
-                for c in res["data"]:
-                    msg += f"• `{c.get('TC')}` - {c.get('ADI')} {c.get('SOYADI')} ({c.get('DOGUMTARIHI')})\n"
-            else:
-                msg = f"❌ **Hata:** {res.get('error', 'Kayıt bulunamadı.')}"
-
-        elif action == "adres":
-            res = requests.get(f"{BASE_URL}/adres.php", params={"tc": input_text}).json()
-            if res.get("success"):
-                d = res["data"]
-                msg = (
-                    f"🏠 **ADRES BİLGİSİ**\n\n"
-                    f"👤 **Ad Soyad:** {d.get('AdSoyad')}\n"
-                    f"📍 **Doğum Yeri:** {d.get('DogumYeri')}\n"
-                    f"🏢 **Vergi No:** {d.get('VergiNumarasi')}\n"
-                    f"🏡 **İkametgah:** {d.get('Ikametgah')}"
-                )
-            else:
-                msg = f"❌ **Hata:** {res.get('error', 'Kayıt bulunamadı.')}"
-
+        # --- GSM ➔ TC ---
         elif action == "gsmtc":
             res = requests.get(f"{BASE_URL}/gsmtc.php", params={"gsm": input_text}).json()
             if res.get("success") and res.get("data"):
@@ -191,7 +302,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     msg += f"• TC: `{tc}`\n"
             else:
                 msg = f"❌ **Hata:** {res.get('error', 'Kayıt bulunamadı.')}"
+            await status_msg.edit_text(msg, parse_mode="Markdown", reply_markup=back_btn)
 
+        # --- TC ➔ GSM ---
         elif action == "tcgsm":
             res = requests.get(f"{BASE_URL}/tcgsm.php", params={"tc": input_text}).json()
             if res.get("success") and res.get("data"):
@@ -200,34 +313,35 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     msg += f"• GSM: `{gsm}`\n"
             else:
                 msg = f"❌ **Hata:** {res.get('error', 'Kayıt bulunamadı.')}"
+            await status_msg.edit_text(msg, parse_mode="Markdown", reply_markup=back_btn)
 
-        elif action == "isyeri":
-            res = requests.get(f"{BASE_URL}/isyeri.php", params={"tc": input_text}).json()
-            if res.get("success") and res.get("data"):
-                msg = "💼 **İŞYERİ / SGK BİLGİLERİ**\n\n"
-                for i in res["data"]:
-                    msg += (
-                        f"🏢 **İşyeri:** {i.get('isyeriUnvani')}\n"
-                        f"👤 **Çalışan:** {i.get('calisanAdSoyad')}\n"
-                        f"📅 **Giriş Tarihi:** {i.get('iseGirisTarihi')}\n"
-                        f"📊 **Durum:** {i.get('calismaDurumu')}\n"
-                        f"🔹 **Sektör:** {i.get('isyeriSektoru')}\n"
-                        "-----------------------------------\n"
-                    )
+        # --- DİĞER SORGULAR ---
+        else:
+            endpoint_map = {
+                "aile": ("aile.php", "Aile Sorgu"),
+                "sulale": ("sulale.php", "Sülale Sorgu"),
+                "cocuk": ("cocuk.php", "Çocuk Sorgu"),
+                "adres": ("adres.php", "Adres Sorgu"),
+                "isyeri": ("isyeri.php", "İşyeri Sorgu"),
+            }
+            ep, title = endpoint_map[action]
+            res = requests.get(f"{BASE_URL}/{ep}", params={"tc": input_text}).json()
+            
+            if res.get("success"):
+                import json
+                msg = f"📄 **{title} Sonucu:**\n\n```json\n{json.dumps(res['data'], ensure_ascii=False, indent=2)[:3500]}\n```"
             else:
                 msg = f"❌ **Hata:** {res.get('error', 'Kayıt bulunamadı.')}"
+            await status_msg.edit_text(msg, parse_mode="Markdown", reply_markup=back_btn)
 
     except Exception as e:
-        msg = f"⚠️ Bir bağlantı hatası oluştu: {str(e)}"
+        await status_msg.edit_text(f"⚠️ Bir sorun oluştu: {str(e)}", reply_markup=back_btn)
 
-    # İşlem bittikten sonra aksiyonu sıfırla ve cevabı ver
     context.user_data["action"] = None
-    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=back_btn)
 
 
-# Render Port Kontrolü
 async def handle_ping(request):
-    return web.Response(text="Bot is active and running!")
+    return web.Response(text="Bot is running!")
 
 
 async def main():
@@ -238,12 +352,10 @@ async def main():
 
     app = ApplicationBuilder().token(token).build()
 
-    # Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    # Aiohttp Web Server (Render İçin)
     server = web.Application()
     server.router.add_get("/", handle_ping)
     runner = web.AppRunner(server)
