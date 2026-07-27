@@ -22,24 +22,22 @@ async def check_channels(user_id, context):
             return False
     return True
 
-async def ana_menu_gonder(update_or_query, context, is_callback=False):
-    """Kullanıcı doğrulandığında açılacak olan ANA MENÜ."""
-    # Buraya botun asıl açılmasını istediğin ana menü butonlarını veya metnini ekleyebilirsin
-    ana_menu_text = "🎛️ **Ana Menü**\n\nSisteme başarıyla giriş yaptın. Aşağıdan işlem seçebilirsin:"
+async def sorgu_menuyu_goster(update_or_query, context, is_callback=False):
+    """Kullanıcının göreceği asıl Sorgu Menüsü"""
+    menu_text = "🔍 **Sorgu Paneli**\n\nYapmak istediğin işlemi aşağıdaki butonlardan seçebilirsin:"
     
-    # Örnek ana menü butonları (kendi butonlarına göre düzenleyebilirsin)
+    # Buraya kendi sorgu butonlarını ekleyebilirsin
     keyboard = [
-        [InlineKeyboardButton("🔍 İşlem Yap", callback_data="islem_yap")],
-        [InlineKeyboardButton("👤 Profilim", callback_data="profil")]
+        [InlineKeyboardButton("📋 Ad Soyad Sorgu", callback_data="ad_soyad_sorgu")],
+        [InlineKeyboardButton("📞 GSM Sorgu", callback_data="gsm_sorgu")],
+        [InlineKeyboardButton("🏠 Adres Sorgu", callback_data="adres_sorgu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if is_callback:
-        # Callback üzerinden geldiyse mevcut mesajı ana menü ile güncelle
-        await update_or_query.edit_message_text(text=ana_menu_text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update_or_query.edit_message_text(text=menu_text, reply_markup=reply_markup, parse_mode="Markdown")
     else:
-        # Komut üzerinden geldiyse yeni mesaj olarak gönder
-        await update_or_query.message.reply_text(text=ana_menu_text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update_or_query.message.reply_text(text=menu_text, reply_markup=reply_markup, parse_mode="Markdown")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/start komutu verildiğinde çalışacak ana fonksiyon."""
@@ -65,8 +63,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Zaten üyeyse direkt ana menüyü aç
-    await ana_menu_gonder(update, context, is_callback=False)
+    # Zaten üyeyse direkt sorgu menüsünü aç
+    await sorgu_menuyu_goster(update, context, is_callback=False)
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Kontrol Et butonunun işlevi."""
@@ -80,8 +78,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_member = await check_channels(user_id, context)
     
     if is_member:
-        # Kanallardaysa o uyarı mesajını yok et, direkt ana menüyü getir!
-        await ana_menu_gonder(query, context, is_callback=True)
+        # Kanallardaysa uyarı mesajını silip direkt sorgu menüsünü getir!
+        await sorgu_menuyu_goster(query, context, is_callback=True)
     else:
         await query.answer("Kanallara henüz katılmamışsın! Lütfen önce katıl.", show_alert=True)
 
