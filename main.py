@@ -13,15 +13,14 @@ from telegram.ext import (
     filters,
 )
 
-# Logging ayarları
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 
 BASE_URL = "http://arastir.vip/api"
+API_TIMEOUT = 12  # Maksimum 12 saniye bekle, cevap gelmezse patlama!
 
-# HTML Rapor Şablonu Oluşturucu (Dark / Premium VIP Theme)
 def generate_html_report(title, total_count, headers, rows):
     headers_html = "".join([f"<th>{h}</th>" for h in headers])
     rows_html = ""
@@ -43,35 +42,26 @@ def generate_html_report(title, total_count, headers, rows):
             --text-color: #f8fafc;
             --text-muted: #94a3b8;
             --border-color: #334155;
-            --hover-color: #1e293b;
         }}
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
             margin: 0;
             padding: 20px;
         }}
-        .container {{
-            max-width: 1000px;
-            margin: 0 auto;
-        }}
+        .container {{ max-width: 1000px; margin: 0 auto; }}
         .header {{
             background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
             padding: 24px;
             border-radius: 16px;
             border: 1px solid var(--border-color);
             margin-bottom: 24px;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
             display: flex;
             justify-content: space-between;
             align-items: center;
         }}
-        .header h1 {{
-            margin: 0;
-            font-size: 22px;
-            color: var(--accent-color);
-        }}
+        .header h1 {{ margin: 0; font-size: 22px; color: var(--accent-color); }}
         .badge {{
             background: rgba(56, 189, 248, 0.1);
             color: var(--accent-color);
@@ -86,41 +76,18 @@ def generate_html_report(title, total_count, headers, rows):
             border-radius: 16px;
             border: 1px solid var(--border-color);
             overflow-x: auto;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
         }}
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-            text-align: left;
-            font-size: 14px;
-        }}
+        table {{ width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }}
         th {{
             background-color: rgba(51, 65, 85, 0.5);
             color: var(--text-muted);
             padding: 14px 18px;
             font-weight: 600;
-            text-transform: uppercase;
             font-size: 12px;
-            letter-spacing: 0.5px;
             border-bottom: 1px solid var(--border-color);
         }}
-        td {{
-            padding: 14px 18px;
-            border-bottom: 1px solid var(--border-color);
-            color: var(--text-color);
-        }}
-        tr:last-child td {{
-            border-bottom: none;
-        }}
-        tr:hover td {{
-            background-color: rgba(255, 255, 255, 0.02);
-        }}
-        .footer {{
-            text-align: center;
-            margin-top: 24px;
-            color: var(--text-muted);
-            font-size: 12px;
-        }}
+        td {{ padding: 14px 18px; border-bottom: 1px solid var(--border-color); }}
+        .footer {{ text-align: center; margin-top: 24px; color: var(--text-muted); font-size: 12px; }}
     </style>
 </head>
 <body>
@@ -134,17 +101,11 @@ def generate_html_report(title, total_count, headers, rows):
         </div>
         <div class="table-container">
             <table>
-                <thead>
-                    <tr>{headers_html}</tr>
-                </thead>
-                <tbody>
-                    {rows_html}
-                </tbody>
+                <thead><tr>{headers_html}</tr></thead>
+                <tbody>{rows_html}</tbody>
             </table>
         </div>
-        <div class="footer">
-            Generatör: AraştırX Telegram Bot | VIP Raporlama
-        </div>
+        <div class="footer">Generatör: AraştırX Telegram Bot</div>
     </div>
 </body>
 </html>"""
@@ -178,8 +139,7 @@ def get_main_menu():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
-    bot_name = context.bot.first_name  # Botun Telegram'daki adı
-    
+    bot_name = context.bot.first_name
     text = (
         f"Selam {user_name}! 👋\n\n"
         f"**{bot_name}** sistemine hoş geldin. Sorgulama yapmak istediğin işlemi aşağıdan seçebilirsin:"
@@ -193,7 +153,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     data = query.data
 
     if data == "main_menu":
@@ -216,7 +175,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data in actions:
         action_key, prompt_text = actions[data]
         context.user_data["action"] = action_key
-        
         back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Ana Menüye Dön", callback_data="main_menu")]])
         await query.message.edit_text(prompt_text, parse_mode="Markdown", reply_markup=back_btn)
 
@@ -232,7 +190,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await update.message.reply_text("⏳ Sorgulanıyor ve VIP Rapor hazırlanıyor...")
 
     try:
-        # --- AD SOYAD SORGU ---
         if action == "adsoyad":
             parts = input_text.split()
             if len(parts) < 2:
@@ -243,13 +200,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if len(parts) >= 3: params["il"] = parts[2]
             if len(parts) >= 4: params["ilce"] = parts[3]
 
-            res = requests.get(f"{BASE_URL}/adsoyad.php", params=params).json()
+            # Timeout koruması eklendi!
+            res = requests.get(f"{BASE_URL}/adsoyad.php", params=params, timeout=API_TIMEOUT).json()
             
             if res.get("success") and res.get("data"):
                 data_list = res["data"]
                 count = res.get("count", len(data_list))
 
-                # Eğer sonuç azsa (5 veya altı) normal mesaj at, çoksa VIP HTML Rapor yolla
                 if count <= 5:
                     msg = f"🔍 **AD SOYAD SORGU (Toplam: {count})**\n\n"
                     for item in data_list:
@@ -257,7 +214,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await status_msg.edit_text(msg, parse_mode="Markdown", reply_markup=back_btn)
                 else:
                     headers = ["TC Kimlik No", "Adı", "Soyadı", "Doğum Tarihi"]
-                    rows = [[item.get('TC', ''), item.get('ADI', ''), item.get('SOYADI', ''), item.get('DOGUMTARIHI', '')] for item in data_list]
+                    # Maksimum 1000 kayıtla sınırlandırıyoruz ki bellek şişmesin
+                    rows = [[item.get('TC', ''), item.get('ADI', ''), item.get('SOYADI', ''), item.get('DOGUMTARIHI', '')] for item in data_list[:1000]]
                     
                     html_code = generate_html_report(f"Ad Soyad Sorgu: {input_text.upper()}", count, headers, rows)
                     
@@ -267,16 +225,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await status_msg.delete()
                     await update.message.reply_document(
                         document=InputFile(file_bytes),
-                        caption=f"📊 **Sorgu Tamamlandı!**\n\n🔍 **Arama:** `{input_text}`\n📈 **Toplam Sonuç:** `{count}` adet\n\n*Aşağıdaki HTML dosyasını tarayıcınızda açarak tüm sonuçları karanlık mod VIP panelde inceleyebilirsiniz.*",
+                        caption=f"📊 **Sorgu Tamamlandı!**\n\n🔍 **Arama:** `{input_text}`\n📈 **Toplam Sonuç:** `{count}` adet\n\n*Aşağıdaki HTML dosyasını açarak tüm sonuçları inceleyebilirsiniz.*",
                         parse_mode="Markdown",
                         reply_markup=back_btn
                     )
             else:
                 await status_msg.edit_text(f"❌ **Hata:** {res.get('error', 'Sonuç bulunamadı.')}", reply_markup=back_btn)
 
-        # --- TC SORGU ---
         elif action == "tc":
-            res = requests.get(f"{BASE_URL}/tc.php", params={"tc": input_text}).json()
+            res = requests.get(f"{BASE_URL}/tc.php", params={"tc": input_text}, timeout=API_TIMEOUT).json()
             if res.get("success"):
                 d = res["data"]
                 msg = (
@@ -293,29 +250,22 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 msg = f"❌ **Hata:** {res.get('error', 'Kayıt bulunamadı.')}"
             await status_msg.edit_text(msg, parse_mode="Markdown", reply_markup=back_btn)
 
-        # --- GSM ➔ TC ---
         elif action == "gsmtc":
-            res = requests.get(f"{BASE_URL}/gsmtc.php", params={"gsm": input_text}).json()
+            res = requests.get(f"{BASE_URL}/gsmtc.php", params={"gsm": input_text}, timeout=API_TIMEOUT).json()
             if res.get("success") and res.get("data"):
-                msg = "📱 **GSM ➔ TC SONUCU**\n\n"
-                for tc in res["data"]:
-                    msg += f"• TC: `{tc}`\n"
+                msg = "📱 **GSM ➔ TC SONUCU**\n\n" + "\n".join([f"• TC: `{tc}`" for tc in res["data"]])
             else:
                 msg = f"❌ **Hata:** {res.get('error', 'Kayıt bulunamadı.')}"
             await status_msg.edit_text(msg, parse_mode="Markdown", reply_markup=back_btn)
 
-        # --- TC ➔ GSM ---
         elif action == "tcgsm":
-            res = requests.get(f"{BASE_URL}/tcgsm.php", params={"tc": input_text}).json()
+            res = requests.get(f"{BASE_URL}/tcgsm.php", params={"tc": input_text}, timeout=API_TIMEOUT).json()
             if res.get("success") and res.get("data"):
-                msg = "🆔 **TC ➔ GSM SONUCU**\n\n"
-                for gsm in res["data"]:
-                    msg += f"• GSM: `{gsm}`\n"
+                msg = "🆔 **TC ➔ GSM SONUCU**\n\n" + "\n".join([f"• GSM: `{gsm}`" for gsm in res["data"]])
             else:
                 msg = f"❌ **Hata:** {res.get('error', 'Kayıt bulunamadı.')}"
             await status_msg.edit_text(msg, parse_mode="Markdown", reply_markup=back_btn)
 
-        # --- DİĞER SORGULAR ---
         else:
             endpoint_map = {
                 "aile": ("aile.php", "Aile Sorgu"),
@@ -325,7 +275,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "isyeri": ("isyeri.php", "İşyeri Sorgu"),
             }
             ep, title = endpoint_map[action]
-            res = requests.get(f"{BASE_URL}/{ep}", params={"tc": input_text}).json()
+            res = requests.get(f"{BASE_URL}/{ep}", params={"tc": input_text}, timeout=API_TIMEOUT).json()
             
             if res.get("success"):
                 import json
@@ -334,8 +284,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 msg = f"❌ **Hata:** {res.get('error', 'Kayıt bulunamadı.')}"
             await status_msg.edit_text(msg, parse_mode="Markdown", reply_markup=back_btn)
 
+    except requests.exceptions.Timeout:
+        await status_msg.edit_text("⚠️ **API Zaman Aşımı:** API sunucusu çok yavaş yanıt veriyor veya erişilemiyor.", reply_markup=back_btn)
     except Exception as e:
-        await status_msg.edit_text(f"⚠️ Bir sorun oluştu: {str(e)}", reply_markup=back_btn)
+        await status_msg.edit_text(f"⚠️ **İşlem Hatası:** {str(e)}", reply_markup=back_btn)
 
     context.user_data["action"] = None
 
