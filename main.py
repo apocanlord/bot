@@ -23,10 +23,9 @@ async def check_channels(user_id, context):
     return True
 
 async def sorgu_menuyu_goster(update_or_query, context, is_callback=False):
-    """Kullanıcının göreceği asıl Sorgu Menüsü"""
+    """Kullanıcının göreceği asıl Sorgu Menüsü ve Butonları"""
     menu_text = "🔍 **Sorgu Paneli**\n\nYapmak istediğin işlemi aşağıdaki butonlardan seçebilirsin:"
     
-    # Buraya kendi sorgu butonlarını ekleyebilirsin
     keyboard = [
         [InlineKeyboardButton("📋 Ad Soyad Sorgu", callback_data="ad_soyad_sorgu")],
         [InlineKeyboardButton("📞 GSM Sorgu", callback_data="gsm_sorgu")],
@@ -63,7 +62,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Zaten üyeyse direkt sorgu menüsünü aç
+    # Zaten üyeyse o düz yazıyı geç, doğrudan butonlu sorgu menüsünü aç!
     await sorgu_menuyu_goster(update, context, is_callback=False)
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
