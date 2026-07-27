@@ -22,6 +22,25 @@ async def check_channels(user_id, context):
             return False
     return True
 
+async def ana_menu_gonder(update_or_query, context, is_callback=False):
+    """Kullanıcı doğrulandığında açılacak olan ANA MENÜ."""
+    # Buraya botun asıl açılmasını istediğin ana menü butonlarını veya metnini ekleyebilirsin
+    ana_menu_text = "🎛️ **Ana Menü**\n\nSisteme başarıyla giriş yaptın. Aşağıdan işlem seçebilirsin:"
+    
+    # Örnek ana menü butonları (kendi butonlarına göre düzenleyebilirsin)
+    keyboard = [
+        [InlineKeyboardButton("🔍 İşlem Yap", callback_data="islem_yap")],
+        [InlineKeyboardButton("👤 Profilim", callback_data="profil")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if is_callback:
+        # Callback üzerinden geldiyse mevcut mesajı ana menü ile güncelle
+        await update_or_query.edit_message_text(text=ana_menu_text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        # Komut üzerinden geldiyse yeni mesaj olarak gönder
+        await update_or_query.message.reply_text(text=ana_menu_text, reply_markup=reply_markup, parse_mode="Markdown")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/start komutu verildiğinde çalışacak ana fonksiyon."""
     if not update.effective_user or not update.message:
@@ -46,7 +65,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    await update.message.reply_text("✅ **Doğrulama Başarılı!**\n\nSisteme hoş geldin, artık botu kullanabilirsin.", parse_mode="Markdown")
+    # Zaten üyeyse direkt ana menüyü aç
+    await ana_menu_gonder(update, context, is_callback=False)
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Kontrol Et butonunun işlevi."""
@@ -60,10 +80,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_member = await check_channels(user_id, context)
     
     if is_member:
-        try:
-            await query.edit_message_text("✅ **Doğrulama Başarılı!**\n\nSisteme hoş geldin, artık botu kullanabilirsin.", parse_mode="Markdown")
-        except Exception:
-            await context.bot.send_message(chat_id=user_id, text="✅ **Doğrulama Başarılı!**\n\nSisteme hoş geldin, artık botu kullanabilirsin.", parse_mode="Markdown")
+        # Kanallardaysa o uyarı mesajını yok et, direkt ana menüyü getir!
+        await ana_menu_gonder(query, context, is_callback=True)
     else:
         await query.answer("Kanallara henüz katılmamışsın! Lütfen önce katıl.", show_alert=True)
 
@@ -78,7 +96,6 @@ async def main():
     await app.start()
     await app.updater.start_polling()
     
-    # Botun kapanmasını engellemek için sonsuz döngü
     stop_signal = asyncio.Event()
     await stop_signal.wait()
 
