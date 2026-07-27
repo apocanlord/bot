@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
@@ -23,7 +24,6 @@ async def check_channels(user_id, context):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/start komutu verildiğinde çalışacak ana fonksiyon."""
-    # Güvenlik önlemi: update.message veya effective_user boş olmasın
     if not update.effective_user or not update.message:
         return
 
@@ -39,7 +39,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append([InlineKeyboardButton("🔄 Katıldım, Kontrol Et", callback_data="check")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        # Yeni kullanıcıda ekranın kesin çıkması için reply_text kullanıyoruz
         await update.message.reply_text(
             "⚠️ **Erişim Reddedildi!**\n\nSistemi kullanabilmek için aşağıdaki kanallara katılmanız zorunludur.", 
             reply_markup=reply_markup,
@@ -68,11 +67,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.answer("Kanallara henüz katılmamışsın! Lütfen önce katıl.", show_alert=True)
 
-if __name__ == "__main__":
+async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_callback, pattern="^check$"))
     
     print("Bot başlatıldı ve güncellendi.")
-    app.run_polling()
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    
+    # Botun kapanmasını engellemek için sonsuz döngü
+    stop_signal = asyncio.Event()
+    await stop_signal.wait()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("Bot durduruldu.")
