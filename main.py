@@ -22,22 +22,6 @@ async def check_channels(user_id, context):
             return False
     return True
 
-async def sorgu_menuyu_goster(update_or_query, context, is_callback=False):
-    """Kullanıcının göreceği asıl Sorgu Menüsü ve Butonları"""
-    menu_text = "🔍 **Sorgu Paneli**\n\nYapmak istediğin işlemi aşağıdaki butonlardan seçebilirsin:"
-    
-    keyboard = [
-        [InlineKeyboardButton("📋 Ad Soyad Sorgu", callback_data="ad_soyad_sorgu")],
-        [InlineKeyboardButton("📞 GSM Sorgu", callback_data="gsm_sorgu")],
-        [InlineKeyboardButton("🏠 Adres Sorgu", callback_data="adres_sorgu")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    if is_callback:
-        await update_or_query.edit_message_text(text=menu_text, reply_markup=reply_markup, parse_mode="Markdown")
-    else:
-        await update_or_query.message.reply_text(text=menu_text, reply_markup=reply_markup, parse_mode="Markdown")
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/start komutu verildiğinde çalışacak ana fonksiyon."""
     if not update.effective_user or not update.message:
@@ -62,8 +46,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Zaten üyeyse o düz yazıyı geç, doğrudan butonlu sorgu menüsünü aç!
-    await sorgu_menuyu_goster(update, context, is_callback=False)
+    # Orijinal düz başarılı mesajı
+    await update.message.reply_text("✅ **Doğrulama Başarılı!**\n\nSisteme hoş geldin, artık botu kullanabilirsin.", parse_mode="Markdown")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Kontrol Et butonunun işlevi."""
@@ -77,8 +61,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_member = await check_channels(user_id, context)
     
     if is_member:
-        # Kanallardaysa uyarı mesajını silip direkt sorgu menüsünü getir!
-        await sorgu_menuyu_goster(query, context, is_callback=True)
+        try:
+            await query.edit_message_text("✅ **Doğrulama Başarılı!**\n\nSisteme hoş geldin, artık botu kullanabilirsin.", parse_mode="Markdown")
+        except Exception:
+            await context.bot.send_message(chat_id=user_id, text="✅ **Doğrulama Başarılı!**\n\nSisteme hoş geldin, artık botu kullanabilirsin.", parse_mode="Markdown")
     else:
         await query.answer("Kanallara henüz katılmamışsın! Lütfen önce katıl.", show_alert=True)
 
