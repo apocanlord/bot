@@ -9,32 +9,29 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Bot başlatma ve /start komutu
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_first_name = update.effective_user.first_name
     await update.message.reply_text(f"Selam {user_first_name}! Bot sorunsuz ve aktif şekilde çalışıyor. 🔥")
 
-# /ping komutu
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Pong! 🏓 Sunucu bağlantısı canlı.")
 
 def main():
-    # Token'ı Environment Variable üzerinden alıyoruz
     token = os.environ.get("BOT_TOKEN")
     
     if not token:
-        print("HATA: BOT_TOKEN bulunamadı! Lütfen Render Environment Variables kısmını kontrol et.")
+        print("HATA: BOT_TOKEN bulunamadı!")
         return
 
-    # Telegram uygulamasını kur
+    # Bot uygulamasını başlat
     app = ApplicationBuilder().token(token).build()
 
-    # Komut tanımlamaları
+    # Komutlar
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ping", ping))
 
     print("Bot başarıyla başlatıldı ve dinlemeye geçti...")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
     main()
