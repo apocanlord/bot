@@ -1,4 +1,4 @@
-import logging
+Import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
@@ -6,8 +6,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 # ================= AYARLAR =================
 # Buradaki bilgileri kendi botuna göre doldur
-BOT_TOKEN = "8646358320:AAEj6rlEpCxX1aLOXspgbsTNpVaYtvvGrbE"
-ZORUNLU_KANALLAR = ["@arastirduyuru", "@arastirzorunlu"] 
+BOT_TOKEN = "8646358320:AAFPFwcTofU1SOShS_yHpRBa3MrhlNvF22c"
+ZORUNLU_KANALLAR =["@arastirduyuru", "@arastirzorunlu"] # İstersen tek kanal bırak, istersen çoğalt.
 # ===========================================
 
 async def check_channels(user_id, context):
@@ -15,10 +15,12 @@ async def check_channels(user_id, context):
     for kanal in ZORUNLU_KANALLAR:
         try:
             member = await context.bot.get_chat_member(chat_id=kanal, user_id=user_id)
-            if member.status in ['left', 'kicked']:
+            # Eğer durumu 'left' (ayrılmış), 'kicked' (atılmış) veya 'restricted' ise False döndür
+            if member.status in ['left', 'kicked', 'restricted']:
                 return False
         except Exception as e:
-            logging.error(f"Hata ({kanal}): {e} - Bot bu kanalda admin olmayabilir.")
+            # Bot kullanıcıyı hiç görmediyse (User not found) veya admin değilse buraya düşer
+            logging.error(f"Hata ({kanal}): {e} - Kullanıcı bulunamadı veya bot admin değil.")
             return False
     return True
 
@@ -28,13 +30,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_member = await check_channels(user_id, context)
     
     if not is_member:
-        # Kanallardan birine bile üye değilse butonları göster
-        keyboard = [
-            [InlineKeyboardButton("📢 1. Kanala Katıl", url=f"https://t.me/{ZORUNLU_KANALLAR[0].replace('@', '')}")],
-            [InlineKeyboardButton("📢 2. Kanala Katıl", url=f"https://t.me/{ZORUNLU_KANALLAR[1].replace('@', '')}")],
-            [InlineKeyboardButton("🔄 Kontrol Et", callback_data="check")]
-        ]
+        # OTOMATİK BUTON OLUŞTURUCU: Listede kaç kanal varsa o kadar buton yapar. Çökmeyi engeller!
+        keyboard = []
+        for kanal in ZORUNLU_KANALLAR:
+            kanal_linki = f"https://t.me/{kanal.replace('@', '')}"
+            keyboard.append([InlineKeyboardButton(f"📢 {kanal} Kanalına Katıl", url=kanal_linki)])
+            
+        # En alta kontrol butonunu ekle
+        keyboard.append([InlineKeyboardButton("🔄 Katıldım, Kontrol Et", callback_data="check")])
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await update.message.reply_text(
             "⚠️ **Erişim Reddedildi!**\n\nSistemi kullanabilmek için aşağıdaki kanallara katılmanız zorunludur.", 
             reply_markup=reply_markup,
